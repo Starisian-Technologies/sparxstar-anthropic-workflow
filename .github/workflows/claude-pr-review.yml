@@ -1,0 +1,166 @@
+name: Claude PR Review (Reusable)
+
+on:
+  workflow_call:
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+
+jobs:
+  review:
+    name: Claude Code Review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr diff ${{ github.event.pull_request.number }} > pr.diff
+
+          if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
+            head -c 80000 pr.diff > pr_truncated.diff
+            mv pr_truncated.diff pr.diff
+            echo "truncated=true" >> $GITHUB_OUTPUT
+          else
+            echo "truncated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Load spec context
+        run: |
+          SPEC_CONTEXT=""
+
+          if [ -f "AGENTS.md" ]; then
+            SPEC_CONTEXT="${SPEC_CONTEXT}$(cat AGENTS.md)\n\n"
+          fi
+
+          if [ -f ".github/copilot-instructions.md" ]; then
+            SPEC_CONTEXT="${SPEC_CONTEXT}$(cat .github/copilot-instructions.md)\n\n"
+          fi
+
+          for f in *.md docs/*.md specs/*.md; do
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ]; then
+              SPEC_CONTEXT="${SPEC_CONTEXT}--- FILE: $f ---\n$(cat "$f")\n\n"
+            fi
+          done
+
+          printf "%b" "$SPEC_CONTEXT" > spec_context.txt
+
+      - name: Run Claude review
+        id: claude
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Fail fast if the API key is absent — do not silently produce a broken review
+          if [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it to the repository or organisation secrets."
+            exit 1
+          fi
+
+          DIFF=$(cat pr.diff)
+          SPECS=$(cat spec_context.txt)
+          REPO="${{ github.repository }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          TRUNCATED="${{ steps.diff.outputs.truncated }}"
+          TRUNCATION_LINE=""
+          if [ "${TRUNCATED}" = "true" ]; then
+            TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
+          fi
+
+          # Write the prompt to a file so jq can safely encode it as a JSON string
+          cat > prompt.txt << PROMPT_EOF
+          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
+
+          REPOSITORY: ${REPO}
+          PR #${PR_NUMBER}: ${PR_TITLE}
+          ${TRUNCATION_LINE}
+
+          PLATFORM CONTEXT AND SPECS:
+          ${SPECS}
+
+          PLATFORM-WIDE RULES (apply to every repo):
+          - declare(strict_types=1) in every PHP file
+          - No error_log() — use platform logging pattern
+          - No SELECT * in any query
+          - No MIT license — must be proprietary
+          - No wordpress/mcp-adapter — this package does not exist on Packagist
+          - No local redefinition of any type owned by sparxstar-ouroboros-integrity
+          - No packages/ stub directories — sparxstar-ouroboros-integrity is published
+          - No test files, stub files, or mock files unless explicitly requested
+          - GovernanceTokenSigningMaterial::build() not canonicalize()
+          - ContextPulse signing field order: pulse_id|context_id|device_id|session_id|site_id|network_id|trust_score_4dp|trust_level|behavior_flags_json|geo_zone|network_effective_type|session_duration|issued_at|expires
+          - CI auth step must reference STARISIAN_PACKAGE_TOKEN not COPILOT_MCP_TOKEN
+          - CI auth step must have fail-fast guard on empty token
+          - AuditLedger genesis hash must be str_repeat('0', 64) not empty string
+          - SieveKernel boot() must check did_action('muplugins_loaded') before deferring
+          - GovernanceToken TTL must enforce Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS floor
+          - AES-256-GCM not CBC for authenticated encryption
+          - No identity_id in ContextPulse (replay attack surface)
+          - behavior_flags serialized as sorted JSON array not CSV
+          - FingerprintJS must be vendored script tag not bundled via npm
+          - personal_policy_token must not be returned in REST response body
+          - TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
+
+          REVIEW THE FOLLOWING DIFF:
+          ${DIFF}
+
+          Produce a focused review in this format:
+
+          REPOSITORY: [name]
+          PR: [number and title]
+
+          VERDICT: PASS / FAIL / CONDITIONAL
+
+          VIOLATIONS (must fix before merge):
+          [CRITICAL|HIGH] Description. Rule: [reference].
+
+          WARNINGS (should fix):
+          [MEDIUM|LOW] Description.
+
+          Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
+          PROMPT_EOF
+
+          # Build the JSON request using jq for safe encoding
+          jq -n \
+            --arg model "claude-sonnet-4-20250514" \
+            --argjson max_tokens 4096 \
+            --rawfile content prompt.txt \
+            '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
+            > request.json
+
+          RESPONSE=$(curl -sf https://api.anthropic.com/v1/messages \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d @request.json) || {
+            echo "::error::Claude API request failed. Verify ANTHROPIC_API_KEY is valid."
+            exit 1
+          }
+
+          echo "$RESPONSE" | jq -r '.content[0].text // "Review failed: " + (.error.message // "unknown error")' > review.txt
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REVIEW=$(cat review.txt)
+          TRUNCATION_NOTE=""
+
+          if [ "${{ steps.diff.outputs.truncated }}" = "true" ]; then
+            TRUNCATION_NOTE="> ⚠️ **Diff truncated** — PR exceeds 80KB. Review covers the first portion only. Large PRs should be split."$'\n\n'
+          fi
+
+          COMMENT="## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
+
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --body "$COMMENT"
