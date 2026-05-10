@@ -28,7 +28,23 @@ jobs:
           gh pr diff ${{ github.event.pull_request.number }} > pr.diff
 
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
-            head -c 80000 pr.diff > pr_truncated.diff
+            python3 - <<'PY'
+from pathlib import Path
+
+max_bytes = 80000
+source_path = Path("pr.diff")
+target_path = Path("pr_truncated.diff")
+data = source_path.read_bytes()[:max_bytes]
+
+while data:
+    try:
+        data.decode("utf-8")
+        break
+    except UnicodeDecodeError:
+        data = data[:-1]
+
+target_path.write_bytes(data)
+PY
             mv pr_truncated.diff pr.diff
             echo "truncated=true" >> $GITHUB_OUTPUT
           else
