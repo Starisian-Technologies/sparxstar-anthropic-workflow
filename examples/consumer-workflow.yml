@@ -6,6 +6,6 @@ on:
 
 jobs:
   review:
-    uses: Starisian-Technologies/sparxstar-antrophic-workflow/.github/workflows/claude-pr-review.yml@main
+    uses: Starisian-Technologies/sparxstar-anthropic-workflow/.github/workflows/claude-pr-review.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

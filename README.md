@@ -1,4 +1,4 @@
-# sparxstar-antrophic-workflow
+# sparxstar-anthropic-workflow
 
 Centralised GitHub Actions workflows for the [SPARXSTAR platform](https://github.com/Starisian-Technologies). The reusable `claude-pr-review.yml` workflow runs an automated, Claude-powered code review on every pull request — enforcing platform-wide architectural rules, security standards, and spec compliance automatically, without any per-PR manual effort.
 
@@ -40,7 +40,7 @@ on:
 
 jobs:
   review:
-    uses: Starisian-Technologies/sparxstar-antrophic-workflow/.github/workflows/claude-pr-review.yml@main
+    uses: Starisian-Technologies/sparxstar-anthropic-workflow/.github/workflows/claude-pr-review.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -118,7 +118,7 @@ Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer rep
 ## Repository structure
 
 ```
-sparxstar-antrophic-workflow/
+sparxstar-anthropic-workflow/
 ├── .github/
 │   └── workflows/
 │       └── claude-pr-review.yml   # Reusable workflow (the source of truth)
