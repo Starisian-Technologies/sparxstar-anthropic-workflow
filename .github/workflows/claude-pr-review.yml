@@ -53,23 +53,25 @@ PY
 
       - name: Load spec context
         run: |
-          SPEC_CONTEXT=""
+          : > spec_context.txt
 
           if [ -f "AGENTS.md" ]; then
-            SPEC_CONTEXT="${SPEC_CONTEXT}$(cat AGENTS.md)\n\n"
+            cat AGENTS.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
           fi
 
           if [ -f ".github/copilot-instructions.md" ]; then
-            SPEC_CONTEXT="${SPEC_CONTEXT}$(cat .github/copilot-instructions.md)\n\n"
+            cat .github/copilot-instructions.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
           fi
 
           for f in *.md docs/*.md specs/*.md; do
             if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ]; then
-              SPEC_CONTEXT="${SPEC_CONTEXT}--- FILE: $f ---\n$(cat "$f")\n\n"
+              printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
+              cat "$f" >> spec_context.txt
+              printf '\n\n' >> spec_context.txt
             fi
           done
-
-          printf "%b" "$SPEC_CONTEXT" > spec_context.txt
 
       - name: Run Claude review
         id: claude
