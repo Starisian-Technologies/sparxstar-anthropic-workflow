@@ -173,12 +173,30 @@ PY
         run: |
           REVIEW=$(cat review.txt)
           TRUNCATION_NOTE=""
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          COMMENT_MARKER="<!-- claude-pr-review-comment -->"
 
           if [ "${{ steps.diff.outputs.truncated }}" = "true" ]; then
             TRUNCATION_NOTE="> ⚠️ **Diff truncated** — PR exceeds 80KB. Review covers the first portion only. Large PRs should be split."$'\n\n'
           fi
 
-          COMMENT="## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
+          COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
 
-          gh pr comment ${{ github.event.pull_request.number }} \
-            --body "$COMMENT"
+          EXISTING_COMMENT_ID=$(
+            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+              --paginate \
+              | jq -r --arg marker "$COMMENT_MARKER" '
+                  map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
+                  last |
+                  .id // empty
+                '
+          )
+
+          if [ -n "$EXISTING_COMMENT_ID" ]; then
+            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+              --method PATCH \
+              --raw-field body="$COMMENT"
+          else
+            gh pr comment "$PR_NUMBER" \
+              --body "$COMMENT"
+          fi
