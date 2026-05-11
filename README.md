@@ -37,7 +37,7 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-      workflow_dispatch:
+  workflow_dispatch:
 
 
 jobs:
