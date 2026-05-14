@@ -68,7 +68,7 @@ PY
           fi
 
           for f in *.md docs/*.md specs/*.md; do
-            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ]; then
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
               printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
               cat "$f" >> spec_context.txt
               printf '\n\n' >> spec_context.txt
@@ -110,7 +110,7 @@ PY
           fi
 
           for f in *.md docs/*.md specs/*.md; do
-            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ]; then
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
               printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
               cat "$f" >> spec_context.txt
               printf '\n\n' >> spec_context.txt
