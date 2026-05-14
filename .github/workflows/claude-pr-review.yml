@@ -75,40 +75,6 @@ PY
             fi
           done
 
-         - name: Claude PR Review (Reusable)
-
-on:
-  workflow_call:
-    secrets:
-      ANTHROPIC_API_KEY:
-        required: true
-  workflow_dispatch:
-
-jobs:
-  review:
-    name: Claude Code Review
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get PR diff
-        id: diff
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr diff ${{ github.event.pull_request.number }} > pr.diff
-
-          if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
-            python3 - <<'PY'
-from pathlib import Path
-
 max_bytes = 80000
 source_path = Path("pr.diff")
 target_path = Path("pr_truncated.diff")
