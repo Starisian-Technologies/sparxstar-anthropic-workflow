@@ -1,4 +1,7 @@
-# sparxstar-anthropic-workflow
+<img width="1297" height="652" alt="Screenshot 2026-05-14 2 22 14 PM" src="https://github.com/user-attachments/assets/4f79ad29-1406-4e0e-9328-e65ea88cc263" />
+
+# SPARXSTAR Anthropic Workflow
+## Claude PR Review
 
 Centralised GitHub Actions workflows for the [SPARXSTAR platform](https://github.com/Starisian-Technologies). The reusable `claude-pr-review.yml` workflow runs an automated, Claude-powered code review on every pull request — enforcing platform-wide architectural rules, security standards, and spec compliance automatically, without any per-PR manual effort.
 
