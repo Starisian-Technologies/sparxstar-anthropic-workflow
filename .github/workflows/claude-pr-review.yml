@@ -68,7 +68,49 @@ PY
           fi
 
           for f in *.md docs/*.md specs/*.md; do
-            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ]; then
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
+              printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
+              cat "$f" >> spec_context.txt
+              printf '\n\n' >> spec_context.txt
+            fi
+          done
+
+max_bytes = 80000
+source_path = Path("pr.diff")
+target_path = Path("pr_truncated.diff")
+data = source_path.read_bytes()[:max_bytes]
+
+while data:
+    try:
+        data.decode("utf-8")
+        break
+    except UnicodeDecodeError:
+        data = data[:-1]
+
+target_path.write_bytes(data)
+PY
+            mv pr_truncated.diff pr.diff
+            echo "truncated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "truncated=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Load spec context
+        run: |
+          : > spec_context.txt
+
+          if [ -f "AGENTS.md" ]; then
+            cat AGENTS.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
+          if [ -f ".github/copilot-instructions.md" ]; then
+            cat .github/copilot-instructions.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
+          for f in *.md docs/*.md specs/*.md; do
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
               printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
               cat "$f" >> spec_context.txt
               printf '\n\n' >> spec_context.txt
@@ -80,7 +122,6 @@ PY
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # Fail fast if the API key is absent — do not silently produce a broken review
           if [ -z "${ANTHROPIC_API_KEY}" ]; then
             echo "::error::ANTHROPIC_API_KEY secret is not set. Add it to the repository or organisation secrets."
             exit 1
@@ -97,60 +138,58 @@ PY
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
 
-          # Write the prompt to a file so jq can safely encode it as a JSON string
           cat > prompt.txt << PROMPT_EOF
-          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
+You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
 
-          REPOSITORY: ${REPO}
-          PR #${PR_NUMBER}: ${PR_TITLE}
-          ${TRUNCATION_LINE}
+REPOSITORY: ${REPO}
+PR #${PR_NUMBER}: ${PR_TITLE}
+${TRUNCATION_LINE}
 
-          PLATFORM CONTEXT AND SPECS:
-          ${SPECS}
+PLATFORM CONTEXT AND SPECS:
+${SPECS}
 
-          PLATFORM-WIDE RULES (apply to every repo):
-          - declare(strict_types=1) in every PHP file
-          - No error_log() — use platform logging pattern
-          - No SELECT * in any query
-          - No MIT license — must be proprietary
-          - No wordpress/mcp-adapter — this package does not exist on Packagist
-          - No local redefinition of any type owned by sparxstar-ouroboros-integrity
-          - No packages/ stub directories — sparxstar-ouroboros-integrity is published
-          - No test files, stub files, or mock files unless explicitly requested
-          - GovernanceTokenSigningMaterial::build() not canonicalize()
-          - ContextPulse signing field order: pulse_id|context_id|device_id|session_id|site_id|network_id|trust_score_4dp|trust_level|behavior_flags_json|geo_zone|network_effective_type|session_duration|issued_at|expires
-          - CI auth step must reference STARISIAN_PACKAGE_TOKEN not COPILOT_MCP_TOKEN
-          - CI auth step must have fail-fast guard on empty token
-          - AuditLedger genesis hash must be str_repeat('0', 64) not empty string
-          - SieveKernel boot() must check did_action('muplugins_loaded') before deferring
-          - GovernanceToken TTL must enforce Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS floor
-          - AES-256-GCM not CBC for authenticated encryption
-          - No identity_id in ContextPulse (replay attack surface)
-          - behavior_flags serialized as sorted JSON array not CSV
-          - FingerprintJS must be vendored script tag not bundled via npm
-          - personal_policy_token must not be returned in REST response body
-          - TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
+PLATFORM-WIDE RULES (apply to every repo):
+- declare(strict_types=1) in every PHP file
+- No error_log() — use platform logging pattern
+- No SELECT * in any query
+- No MIT license — must be proprietary
+- No wordpress/mcp-adapter — this package does not exist on Packagist
+- No local redefinition of any type owned by sparxstar-ouroboros-integrity
+- No packages/ stub directories — sparxstar-ouroboros-integrity is published
+- No test files, stub files, or mock files unless explicitly requested
+- GovernanceTokenSigningMaterial::build() not canonicalize()
+- ContextPulse signing field order: pulse_id|context_id|device_id|session_id|site_id|network_id|trust_score_4dp|trust_level|behavior_flags_json|geo_zone|network_effective_type|session_duration|issued_at|expires
+- CI auth step must reference STARISIAN_PACKAGE_TOKEN not COPILOT_MCP_TOKEN
+- CI auth step must have fail-fast guard on empty token
+- AuditLedger genesis hash must be str_repeat('0', 64) not empty string
+- SieveKernel boot() must check did_action('muplugins_loaded') before deferring
+- GovernanceToken TTL must enforce Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS floor
+- AES-256-GCM not CBC for authenticated encryption
+- No identity_id in ContextPulse (replay attack surface)
+- behavior_flags serialized as sorted JSON array not CSV
+- FingerprintJS must be vendored script tag not bundled via npm
+- personal_policy_token must not be returned in REST response body
+- TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
 
-          REVIEW THE FOLLOWING DIFF:
-          ${DIFF}
+REVIEW THE FOLLOWING DIFF:
+${DIFF}
 
-          Produce a focused review in this format:
+Produce a focused review in this format:
 
-          REPOSITORY: [name]
-          PR: [number and title]
+REPOSITORY: [name]
+PR: [number and title]
 
-          VERDICT: PASS / FAIL / CONDITIONAL
+VERDICT: PASS / FAIL / CONDITIONAL
 
-          VIOLATIONS (must fix before merge):
-          [CRITICAL|HIGH] Description. Rule: [reference].
+VIOLATIONS (must fix before merge):
+[CRITICAL|HIGH] Description. Rule: [reference].
 
-          WARNINGS (should fix):
-          [MEDIUM|LOW] Description.
+WARNINGS (should fix):
+[MEDIUM|LOW] Description.
 
-          Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
-          PROMPT_EOF
+Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
+PROMPT_EOF
 
-          # Build the JSON request using jq for safe encoding
           jq -n \
             --arg model "claude-sonnet-4-20250514" \
             --argjson max_tokens 4096 \
