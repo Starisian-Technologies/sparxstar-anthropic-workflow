@@ -29,7 +29,7 @@ jobs:
           gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
 
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
-          python3 - <<'PY'
+            python3 - <<'PY'
           from pathlib import Path
 
           max_bytes = 80000
