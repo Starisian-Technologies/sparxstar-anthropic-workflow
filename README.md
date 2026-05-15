@@ -112,6 +112,42 @@ WARNINGS (should fix):
 
 ---
 
+## Troubleshooting
+
+### Claude is reviewing fictional files / hallucinating violations
+
+**Symptom:** Claude posts a review referencing file paths and violations that don't exist in the PR.
+
+**Cause:** The diff is not reaching Claude. Either `pr.diff` is empty, or there was a variable-substitution issue in an older version of the workflow. Upgrade to the latest version of this workflow on `main`.
+
+**To diagnose**, clone this repo, add a temporary debug step after **Get PR diff** in `claude-pr-review.yml`, and push to inspect `pr.diff` directly:
+
+```yaml
+- name: Debug diff
+  run: |
+    echo "Diff size: $(wc -c < pr.diff)"
+    head -50 pr.diff
+```
+
+If `pr.diff` is empty, check:
+1. The consumer workflow passes `GITHUB_TOKEN` with `pull-requests: write` (required for `gh pr diff`).
+2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger.
+3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
+
+---
+
+### Workflow fails at "Get PR diff" with "PR diff is empty"
+
+The workflow now exits early with a clear error rather than sending a blank prompt to Claude. Resolve the `GH_TOKEN` permission or PR-number issue described above.
+
+---
+
+### Claude API request failed
+
+Verify `ANTHROPIC_API_KEY` is set in **Settings → Secrets → Actions** on the consumer repo or at the organisation level.
+
+---
+
 ## Updating the rules
 
 Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer repos pick up the changes on their next PR without any action required on their side.
@@ -123,10 +159,12 @@ Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer rep
 ```
 sparxstar-anthropic-workflow/
 ├── .github/
+│   ├── instructions/
+│   │   └── *.instructions.md     # IDE/Copilot context only — not loaded by the review workflow
 │   └── workflows/
-│       └── claude-pr-review.yml   # Reusable workflow (the source of truth)
+│       └── claude-pr-review.yml  # Reusable workflow (the source of truth)
 ├── examples/
-│   └── consumer-workflow.yml      # Template to copy into consumer repos
+│   └── consumer-workflow.yml     # Template to copy into consumer repos
 └── README.md
 ```
 

@@ -28,6 +28,11 @@ jobs:
         run: |
           gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
 
+          if [ ! -s pr.diff ]; then
+            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the PR number is valid and that GH_TOKEN has pull-requests: read permission. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            exit 1
+          fi
+
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
             python3 - <<'PY'
           from pathlib import Path
@@ -94,8 +99,9 @@ jobs:
           if [ "${TRUNCATED}" = "true" ]; then
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
+          export DIFF SPECS REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
 
-          cat > prompt.txt <<'PROMPT_EOF'
+          cat > prompt_template.txt <<'PROMPT_EOF'
           You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
 
           REPOSITORY: ${REPO}
@@ -146,6 +152,12 @@ jobs:
 
           Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
           PROMPT_EOF
+
+          # Substitute only the six known variables (concatenated names form the allowlist);
+          # any ${...} patterns that appear inside the diff or spec file content are left
+          # untouched so they are not accidentally expanded or stripped.
+          envsubst '${DIFF}${SPECS}${REPO}${PR_TITLE}${PR_NUMBER}${TRUNCATION_LINE}' \
+            < prompt_template.txt > prompt.txt
 
           jq -n \
             --arg model "claude-sonnet-4-20250514" \
