@@ -95,7 +95,7 @@ jobs:
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
 
-          cat > prompt.txt <<'PROMPT_EOF'
+          cat > prompt.txt <<PROMPT_EOF
           You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
 
           REPOSITORY: ${REPO}
