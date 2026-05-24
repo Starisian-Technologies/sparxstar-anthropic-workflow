@@ -26,10 +26,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
+          if ! gh pr diff "${{ github.event.pull_request.number }}" > pr.diff 2> gh_pr_diff.stderr; then
+            echo "::error::Failed to fetch PR diff. Check that the PR number is valid and that GH_TOKEN has pull-requests: read permission. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            if [ -s gh_pr_diff.stderr ]; then
+              echo "::group::gh pr diff stderr"
+              cat gh_pr_diff.stderr
+              echo "::endgroup::"
+            fi
+            exit 1
+          fi
 
           if [ ! -s pr.diff ]; then
             echo "::error::PR diff is empty — gh pr diff returned no output. Check that the PR number is valid and that GH_TOKEN has pull-requests: read permission. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            if [ -s gh_pr_diff.stderr ]; then
+              echo "::group::gh pr diff stderr"
+              cat gh_pr_diff.stderr
+              echo "::endgroup::"
+            fi
             exit 1
           fi
 
