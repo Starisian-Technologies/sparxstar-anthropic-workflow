@@ -130,9 +130,10 @@ WARNINGS (should fix):
   run: |
     # ... existing gh pr diff command ...
     echo "Diff size: $(wc -c < pr.diff)"
-    head -50 pr.diff
+1. The consumer workflow grants `GITHUB_TOKEN` `pull-requests: write` (required to post/update the review comment; `pull-requests: read` is sufficient for `gh pr diff`).
     # ... existing empty-diff guard ...
 ```
+3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
 
 If `pr.diff` is empty, check:
 1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`.
