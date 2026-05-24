@@ -99,6 +99,26 @@ jobs:
             fi
           done
 
+          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+
+          max_bytes = 50000
+          path = Path("spec_context.txt")
+          data = path.read_bytes()[:max_bytes]
+
+          while data:
+              try:
+                  data.decode("utf-8")
+                  break
+              except UnicodeDecodeError:
+                  data = data[:-1]
+
+          path.write_bytes(data)
+          PY
+            echo "::warning::Spec context truncated to 50KB. Consumer repo spec files are large; ensure the most important context appears first."
+          fi
+
       - name: Run Claude review
         id: claude
         env:
