@@ -130,21 +130,20 @@ WARNINGS (should fix):
   run: |
     # ... existing gh pr diff command ...
     echo "Diff size: $(wc -c < pr.diff)"
-1. The consumer workflow grants `GITHUB_TOKEN` `pull-requests: write` (required to post/update the review comment; `pull-requests: read` is sufficient for `gh pr diff`).
+    head -50 pr.diff
     # ... existing empty-diff guard ...
 ```
-3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
 
 If `pr.diff` is empty, check:
-1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`.
-2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger.
+1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`. `pull-requests: read` is sufficient for `gh pr diff`, but `pull-requests: write` is still required later to post or update the review comment.
+2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger for end-to-end review runs.
 3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
 
 ---
 
 ### Workflow fails at "Get PR diff" with "PR diff is empty"
 
-The workflow now exits early with a clear error rather than sending a blank prompt to Claude. Resolve the `GH_TOKEN` permission or PR-number issue described above.
+The workflow now exits early with a clear error rather than sending a blank prompt to Claude. Resolve the event/PR-number or `GH_TOKEN` permission issue described above.
 
 ---
 

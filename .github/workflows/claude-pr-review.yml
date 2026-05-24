@@ -26,8 +26,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if ! gh pr diff "${{ github.event.pull_request.number }}" > pr.diff 2> gh_pr_diff.stderr; then
-            echo "::error::Failed to fetch PR diff. Check that the PR number is valid and that GH_TOKEN has pull-requests: read permission. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          if [ -z "${PR_NUMBER}" ]; then
+            echo "::error::No pull request number found in the workflow event payload. This workflow requires a pull_request event; workflow_dispatch cannot fetch a PR diff."
+            exit 1
+          fi
+
+          if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
+            echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
             if [ -s gh_pr_diff.stderr ]; then
               echo "::group::gh pr diff stderr"
               cat gh_pr_diff.stderr
@@ -37,7 +44,7 @@ jobs:
           fi
 
           if [ ! -s pr.diff ]; then
-            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the PR number is valid and that GH_TOKEN has pull-requests: read permission. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the workflow ran for a pull_request event, that the pull request number is valid, and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
             if [ -s gh_pr_diff.stderr ]; then
               echo "::group::gh pr diff stderr"
               cat gh_pr_diff.stderr
