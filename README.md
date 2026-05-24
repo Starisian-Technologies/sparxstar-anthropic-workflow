@@ -43,12 +43,15 @@ on:
 
 jobs:
   review:
+    permissions:
+      contents: read
+      pull-requests: write
     uses: Starisian-Technologies/sparxstar-anthropic-workflow/.github/workflows/claude-pr-review.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-That is the entire file. No logic to copy or maintain.
+That is the entire file. No logic to copy or maintain. The caller must grant `GITHUB_TOKEN` the `contents: read` and `pull-requests: write` permissions shown above so the reusable workflow can read the diff and post/update its PR comment.
 
 ### 3. Optional spec context
 
@@ -120,17 +123,19 @@ WARNINGS (should fix):
 
 **Cause:** The diff is not reaching Claude. Either `pr.diff` is empty, or there was a variable-substitution issue in an older version of the workflow. Upgrade to the latest version of this workflow on `main`.
 
-**To diagnose**, clone this repo, add a temporary debug step after **Get PR diff** in `claude-pr-review.yml`, and push to inspect `pr.diff` directly:
+**To diagnose**, clone this repo, edit the **Get PR diff** step in `claude-pr-review.yml`, and place the debug lines immediately after `gh pr diff` succeeds and before the empty-diff guard:
 
 ```yaml
-- name: Debug diff
+- name: Get PR diff
   run: |
+    # ... existing gh pr diff command ...
     echo "Diff size: $(wc -c < pr.diff)"
     head -50 pr.diff
+    # ... existing empty-diff guard ...
 ```
 
 If `pr.diff` is empty, check:
-1. The consumer workflow passes `GITHUB_TOKEN` with `pull-requests: write` (required for `gh pr diff`).
+1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`.
 2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger.
 3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
 
@@ -160,7 +165,7 @@ Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer rep
 sparxstar-anthropic-workflow/
 ├── .github/
 │   ├── instructions/
-│   │   └── *.instructions.md     # IDE/Copilot context only — not loaded by the review workflow
+│   │   └── claude-review.instructions.md  # IDE/Copilot context only — not loaded by the review workflow
 │   └── workflows/
 │       └── claude-pr-review.yml  # Reusable workflow (the source of truth)
 ├── examples/

@@ -102,8 +102,6 @@ jobs:
             exit 1
           fi
 
-          DIFF=$(cat pr.diff)
-          SPECS=$(cat spec_context.txt)
           REPO="${{ github.repository }}"
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -112,7 +110,7 @@ jobs:
           if [ "${TRUNCATED}" = "true" ]; then
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
-          export DIFF SPECS REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
+          export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
 
           cat > prompt_template.txt <<'PROMPT_EOF'
           You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
@@ -166,11 +164,24 @@ jobs:
           Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
           PROMPT_EOF
 
-          # Substitute only the six known variables (concatenated names form the allowlist);
-          # any ${...} patterns that appear inside the diff or spec file content are left
-          # untouched so they are not accidentally expanded or stripped.
-          envsubst '${DIFF}${SPECS}${REPO}${PR_TITLE}${PR_NUMBER}${TRUNCATION_LINE}' \
-            < prompt_template.txt > prompt.txt
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          token_values = {
+              "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
+              "${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8"),
+              "${REPO}": os.environ["REPO"],
+              "${PR_TITLE}": os.environ["PR_TITLE"],
+              "${PR_NUMBER}": os.environ["PR_NUMBER"],
+              "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
+          }
+          pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\}")
+          template = Path("prompt_template.txt").read_text(encoding="utf-8")
+          prompt = pattern.sub(lambda match: token_values[match.group(0)], template)
+          Path("prompt.txt").write_text(prompt, encoding="utf-8")
+          PY
 
           jq -n \
             --arg model "claude-sonnet-4-20250514" \
