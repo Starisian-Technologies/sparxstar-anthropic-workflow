@@ -11,7 +11,7 @@ Centralised GitHub Actions workflows for the [SPARXSTAR platform](https://github
 
 1. A consumer repo adds a **single nine-line workflow file** that calls this repo's reusable workflow.
 2. When a PR is opened, updated, or reopened, GitHub runs the review automatically.
-3. The workflow pulls the PR diff, reads the repo's own spec docs and Copilot instructions for context, sends everything to Claude with all SPARXSTAR platform rules baked in, and posts the findings as a comment directly on the PR.
+3. The workflow pulls the PR diff, reads the repo's own spec docs and Copilot instructions plus this workflow repo's `reference/*.md` standards, sends everything to Claude with all SPARXSTAR platform rules baked in, and posts the findings as a comment directly on the PR.
 4. The review identifies **violations** (must fix before merge) and **warnings** (should fix), and delivers a final **PASS / FAIL / CONDITIONAL** verdict.
 
 Because the logic lives here and is referenced by all consumer repos, a single update to this file propagates to every repo on the next PR.
@@ -64,6 +64,8 @@ The workflow automatically picks up the following files from the consumer repo i
 | `*.md` (root, excluding README and CHANGELOG) | Spec and design docs |
 | `docs/*.md` | Documentation |
 | `specs/*.md` | Specification files |
+
+In addition to consumer-repo docs, the reusable workflow also loads platform standards from this repository's `reference/*.md` files on every run.
 
 ---
 
@@ -170,6 +172,8 @@ sparxstar-anthropic-workflow/
 │       └── claude-pr-review.yml  # Reusable workflow (the source of truth)
 ├── examples/
 │   └── consumer-workflow.yml     # Template to copy into consumer repos
+├── reference/
+│   └── ref-*.md                  # Platform reference/spec documents injected into review context
 └── README.md
 ```
 
