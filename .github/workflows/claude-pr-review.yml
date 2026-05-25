@@ -26,7 +26,32 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr diff "${{ github.event.pull_request.number }}" > pr.diff
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          if [ -z "${PR_NUMBER}" ]; then
+            echo "::error::No pull request number found in the workflow event payload. This workflow requires a pull_request event; workflow_dispatch cannot fetch a PR diff."
+            exit 1
+          fi
+
+          if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
+            echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            if [ -s gh_pr_diff.stderr ]; then
+              echo "::group::gh pr diff stderr"
+              cat gh_pr_diff.stderr
+              echo "::endgroup::"
+            fi
+            exit 1
+          fi
+
+          if [ ! -s pr.diff ]; then
+            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the workflow ran for a pull_request event, that the pull request number is valid, and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            if [ -s gh_pr_diff.stderr ]; then
+              echo "::group::gh pr diff stderr"
+              cat gh_pr_diff.stderr
+              echo "::endgroup::"
+            fi
+            exit 1
+          fi
 
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
             python3 - <<'PY'
@@ -74,6 +99,26 @@ jobs:
             fi
           done
 
+          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+
+          max_bytes = 50000
+          path = Path("spec_context.txt")
+          data = path.read_bytes()[:max_bytes]
+
+          while data:
+              try:
+                  data.decode("utf-8")
+                  break
+              except UnicodeDecodeError:
+                  data = data[:-1]
+
+          path.write_bytes(data)
+          PY
+            echo "::warning::Spec context truncated to 50KB. Consumer repo spec files are large; ensure the most important context appears first."
+          fi
+
       - name: Run Claude review
         id: claude
         env:
@@ -84,8 +129,6 @@ jobs:
             exit 1
           fi
 
-          DIFF=$(cat pr.diff)
-          SPECS=$(cat spec_context.txt)
           REPO="${{ github.repository }}"
           PR_TITLE="${{ github.event.pull_request.title }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"
@@ -94,8 +137,9 @@ jobs:
           if [ "${TRUNCATED}" = "true" ]; then
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
+          export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
 
-          cat > prompt.txt <<PROMPT_EOF
+          cat > prompt_template.txt <<'PROMPT_EOF'
           You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
 
           REPOSITORY: ${REPO}
@@ -146,6 +190,25 @@ jobs:
 
           Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
           PROMPT_EOF
+
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          token_values = {
+              "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
+              "${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8"),
+              "${REPO}": os.environ["REPO"],
+              "${PR_TITLE}": os.environ["PR_TITLE"],
+              "${PR_NUMBER}": os.environ["PR_NUMBER"],
+              "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
+          }
+          pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\}")
+          template = Path("prompt_template.txt").read_text(encoding="utf-8")
+          prompt = pattern.sub(lambda match: token_values[match.group(0)], template)
+          Path("prompt.txt").write_text(prompt, encoding="utf-8")
+          PY
 
           jq -n \
             --arg model "claude-sonnet-4-20250514" \

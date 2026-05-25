@@ -43,12 +43,15 @@ on:
 
 jobs:
   review:
+    permissions:
+      contents: read
+      pull-requests: write
     uses: Starisian-Technologies/sparxstar-anthropic-workflow/.github/workflows/claude-pr-review.yml@main
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-That is the entire file. No logic to copy or maintain.
+That is the entire file. No logic to copy or maintain. The caller must grant `GITHUB_TOKEN` the `contents: read` and `pull-requests: write` permissions shown above so the reusable workflow can read the diff and post/update its PR comment.
 
 ### 3. Optional spec context
 
@@ -112,6 +115,44 @@ WARNINGS (should fix):
 
 ---
 
+## Troubleshooting
+
+### Claude is reviewing fictional files / hallucinating violations
+
+**Symptom:** Claude posts a review referencing file paths and violations that don't exist in the PR.
+
+**Cause:** The diff is not reaching Claude. Either `pr.diff` is empty, or there was a variable-substitution issue in an older version of the workflow. Upgrade to the latest version of this workflow on `main`.
+
+**To diagnose**, clone this repo, edit the **Get PR diff** step in `claude-pr-review.yml`, and place the debug lines immediately after `gh pr diff` succeeds and before the empty-diff guard:
+
+```yaml
+- name: Get PR diff
+  run: |
+    # ... existing gh pr diff command ...
+    echo "Diff size: $(wc -c < pr.diff)"
+    head -50 pr.diff
+    # ... existing empty-diff guard ...
+```
+
+If `pr.diff` is empty, check:
+1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`. `pull-requests: read` is sufficient for `gh pr diff`, but `pull-requests: write` is still required later to post or update the review comment.
+2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger for end-to-end review runs.
+3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
+
+---
+
+### Workflow fails at "Get PR diff" with "PR diff is empty"
+
+The workflow now exits early with a clear error rather than sending a blank prompt to Claude. Resolve the event/PR-number or `GH_TOKEN` permission issue described above.
+
+---
+
+### Claude API request failed
+
+Verify `ANTHROPIC_API_KEY` is set in **Settings → Secrets → Actions** on the consumer repo or at the organisation level.
+
+---
+
 ## Updating the rules
 
 Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer repos pick up the changes on their next PR without any action required on their side.
@@ -123,10 +164,12 @@ Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer rep
 ```
 sparxstar-anthropic-workflow/
 ├── .github/
+│   ├── instructions/
+│   │   └── claude-review.instructions.md  # IDE/Copilot context only — not loaded by the review workflow
 │   └── workflows/
-│       └── claude-pr-review.yml   # Reusable workflow (the source of truth)
+│       └── claude-pr-review.yml  # Reusable workflow (the source of truth)
 ├── examples/
-│   └── consumer-workflow.yml      # Template to copy into consumer repos
+│   └── consumer-workflow.yml     # Template to copy into consumer repos
 └── README.md
 ```
 
