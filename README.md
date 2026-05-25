@@ -40,7 +40,7 @@ Required:
 5. Upserts a single review comment on the PR.
 
 ## Determinism and safeguards
-- PR-only invocation via `workflow_call`
+- Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
 - Diff truncation at 80KB and context truncation at 50KB with explicit notices
 - Fail-fast handling for missing PR data, empty diff, and missing API key
 - Scoped GitHub token permissions and no credential persistence on checkout
