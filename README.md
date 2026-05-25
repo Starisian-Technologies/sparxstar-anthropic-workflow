@@ -7,6 +7,7 @@ Centralized reusable GitHub Actions workflow for Claude-powered pull request rev
 - Consumer integration example: `examples/consumer-workflow.yml`
 - Governance baseline: contributing, security, support, code ownership, issue/PR templates
 - Operational docs for architecture, CI/CD, deployment, and upgrade/rollback
+- Platform reference docs injected into review context: `reference/*.md`
 
 ## Quick start for consumer repositories
 Create `.github/workflows/claude-pr-review.yml`:
@@ -34,7 +35,7 @@ Required:
 
 ## Workflow behavior
 1. Loads PR diff from the caller repository.
-2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs).
+2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) and platform reference docs from `reference/*.md` in this workflow repository.
 3. Builds deterministic prompt from diff + context.
 4. Calls Anthropic Messages API.
 5. Upserts a single review comment on the PR.
