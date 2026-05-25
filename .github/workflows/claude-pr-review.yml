@@ -5,12 +5,15 @@ on:
     secrets:
       ANTHROPIC_API_KEY:
         required: true
-  workflow_dispatch:
 
 jobs:
   review:
     name: Claude Code Review
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: claude-pr-review-${{ github.repository }}-${{ github.event.pull_request.number || github.run_id }}
+      cancel-in-progress: true
     permissions:
       contents: read
       pull-requests: write
@@ -20,12 +23,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Get PR diff
         id: diff
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           PR_NUMBER="${{ github.event.pull_request.number }}"
 
           if [ -z "${PR_NUMBER}" ]; then
@@ -79,6 +84,7 @@ jobs:
 
       - name: Load spec context
         run: |
+          set -euo pipefail
           : > spec_context.txt
 
           if [ -f "AGENTS.md" ]; then
@@ -124,6 +130,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          set -euo pipefail
           if [ -z "${ANTHROPIC_API_KEY}" ]; then
             echo "::error::ANTHROPIC_API_KEY secret is not set. Add it to the repository or organisation secrets."
             exit 1
@@ -232,6 +239,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           REVIEW=$(cat review.txt)
           TRUNCATION_NOTE=""
           PR_NUMBER="${{ github.event.pull_request.number }}"
