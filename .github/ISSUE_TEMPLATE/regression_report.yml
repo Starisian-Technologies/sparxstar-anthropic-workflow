@@ -1,0 +1,30 @@
+name: Regression report
+description: Report behavior that previously worked and now fails
+title: "[Regression]: "
+labels: ["regression"]
+body:
+  - type: input
+    id: last_known_good
+    attributes:
+      label: Last known good version/commit
+    validations:
+      required: true
+  - type: input
+    id: first_bad
+    attributes:
+      label: First known bad version/commit
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Impact scope
+      description: Which repositories or workflows are affected?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true

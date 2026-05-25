@@ -1,0 +1,12 @@
+# Default ownership
+* @StarisianDevelopment @MaximillianGroup
+
+# Security and automation surfaces
+/.github/workflows/ @StarisianDevelopment @MaximillianGroup
+/.github/ISSUE_TEMPLATE/ @StarisianDevelopment
+/.github/PULL_REQUEST_TEMPLATE.md @StarisianDevelopment
+
+# Governance docs
+/SECURITY.md @StarisianDevelopment @MaximillianGroup
+/CONTRIBUTING.md @StarisianDevelopment
+/docs/ @StarisianDevelopment

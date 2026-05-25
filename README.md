@@ -1,38 +1,15 @@
-<img width="1297" height="652" alt="Screenshot 2026-05-14 2 22 14 PM" src="https://github.com/user-attachments/assets/4f79ad29-1406-4e0e-9328-e65ea88cc263" />
-
 # SPARXSTAR Anthropic Workflow
-## Claude PR Review
 
-Centralised GitHub Actions workflows for the [SPARXSTAR platform](https://github.com/Starisian-Technologies). The reusable `claude-pr-review.yml` workflow runs an automated, Claude-powered code review on every pull request — enforcing platform-wide architectural rules, security standards, and spec compliance automatically, without any per-PR manual effort.
+Centralized reusable GitHub Actions workflow for Claude-powered pull request review across Starisian Technologies repositories.
 
----
+## What this repository provides
+- Reusable PR review workflow: `.github/workflows/claude-pr-review.yml`
+- Consumer integration example: `examples/consumer-workflow.yml`
+- Governance baseline: contributing, security, support, code ownership, issue/PR templates
+- Operational docs for architecture, CI/CD, deployment, and upgrade/rollback
 
-## How it works
-
-1. A consumer repo adds a **single nine-line workflow file** that calls this repo's reusable workflow.
-2. When a PR is opened, updated, or reopened, GitHub runs the review automatically.
-3. The workflow pulls the PR diff, reads the repo's own spec docs and Copilot instructions for context, sends everything to Claude with all SPARXSTAR platform rules baked in, and posts the findings as a comment directly on the PR.
-4. The review identifies **violations** (must fix before merge) and **warnings** (should fix), and delivers a final **PASS / FAIL / CONDITIONAL** verdict.
-
-Because the logic lives here and is referenced by all consumer repos, a single update to this file propagates to every repo on the next PR.
-
----
-
-## Setup
-
-### 1. Add the secret
-
-Add `ANTHROPIC_API_KEY` to your organisation secrets (preferred) or to each consumer repo's secrets:
-
-> **Settings → Secrets and variables → Actions → New secret**
-> Name: `ANTHROPIC_API_KEY`
-> Value: your Anthropic API key
-
-The workflow will fail fast with a clear error message if the secret is missing.
-
-### 2. Add the consumer workflow
-
-In each repo that should receive automated reviews, create `.github/workflows/claude-pr-review.yml` with the following content (also available in [`examples/consumer-workflow.yml`](examples/consumer-workflow.yml)):
+## Quick start for consumer repositories
+Create `.github/workflows/claude-pr-review.yml`:
 
 ```yaml
 name: Claude PR Review
@@ -51,128 +28,50 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-That is the entire file. No logic to copy or maintain. The caller must grant `GITHUB_TOKEN` the `contents: read` and `pull-requests: write` permissions shown above so the reusable workflow can read the diff and post/update its PR comment.
+Required:
+- Secret: `ANTHROPIC_API_KEY`
+- Permissions: `contents: read` and `pull-requests: write`
 
-### 3. Optional spec context
+## Workflow behavior
+1. Loads PR diff from the caller repository.
+2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs).
+3. Builds deterministic prompt from diff + context.
+4. Calls Anthropic Messages API.
+5. Upserts a single review comment on the PR.
 
-The workflow automatically picks up the following files from the consumer repo if they exist and includes them in the review prompt for repo-specific context:
+## Determinism and safeguards
+- Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- Diff truncation at 80KB and context truncation at 50KB with explicit notices
+- Fail-fast handling for missing PR data, empty diff, and missing API key
+- Scoped GitHub token permissions and no credential persistence on checkout
 
-| File | Purpose |
-|------|---------|
-| `AGENTS.md` | Agent/AI instructions |
-| `.github/copilot-instructions.md` | Copilot coding instructions |
-| `*.md` (root, excluding README and CHANGELOG) | Spec and design docs |
-| `docs/*.md` | Documentation |
-| `specs/*.md` | Specification files |
+## Governance and standards files
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `SUPPORT.md`
+- `CHANGELOG.md`
+- `CODE_OF_CONDUCT.md`
+- `CODEOWNERS`
+- `.github/PULL_REQUEST_TEMPLATE.md`
+- `.github/ISSUE_TEMPLATE/*.yml`
 
----
-
-## Platform-wide rules enforced on every PR
-
-Every review checks the following rules regardless of which repo triggered it:
-
-| Rule | Description |
-|------|-------------|
-| `strict_types` | `declare(strict_types=1)` in every PHP file |
-| No `error_log()` | Use the platform logging pattern |
-| No `SELECT *` | All queries must be explicit |
-| No MIT licence | All repos must use a proprietary licence |
-| No phantom packages | `wordpress/mcp-adapter` does not exist on Packagist |
-| No type redefinition | Never locally redefine types owned by `sparxstar-ouroboros-integrity` |
-| No stub directories | `packages/` stubs are forbidden — the real package is published |
-| No unrequested test/stub files | Test, stub, and mock files must be explicitly requested |
-| Signing method | `GovernanceTokenSigningMaterial::build()` not `canonicalize()` |
-| ContextPulse field order | `pulse_id\|context_id\|device_id\|session_id\|site_id\|network_id\|trust_score_4dp\|trust_level\|behavior_flags_json\|geo_zone\|network_effective_type\|session_duration\|issued_at\|expires` |
-| Token reference | CI auth must reference `STARISIAN_PACKAGE_TOKEN` not `COPILOT_MCP_TOKEN` |
-| Fail-fast token guard | CI auth step must exit if token is empty |
-| Genesis hash | `AuditLedger` genesis hash must be `str_repeat('0', 64)` not an empty string |
-| SieveKernel boot | `boot()` must check `did_action('muplugins_loaded')` before deferring |
-| Governance TTL | Must enforce `Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS` floor |
-| Encryption | AES-256-GCM only — never CBC |
-| No `identity_id` | Must not appear in `ContextPulse` (replay attack surface) |
-| `behavior_flags` format | Serialised as a sorted JSON array — never CSV |
-| FingerprintJS | Must be a vendored `<script>` tag — never bundled via npm |
-| Policy token | `personal_policy_token` must not be returned in REST response body |
-| TEXT column defaults | `TEXT` columns in MySQL/MariaDB must not have `DEFAULT NULL` — use `NULL` only |
-
----
-
-## Review output format
-
-```
-REPOSITORY: Starisian-Technologies/example-repo
-PR: #42 Add governance token signing
-
-VERDICT: FAIL
-
-VIOLATIONS (must fix before merge):
-[CRITICAL] Uses canonicalize() instead of build() on line 87 of src/Signing/Material.php. Rule: GovernanceTokenSigningMaterial::build() not canonicalize().
-[HIGH] SELECT * used in query on line 34 of src/Repository/LedgerRepository.php. Rule: No SELECT *.
-
-WARNINGS (should fix):
-[MEDIUM] genesis_hash initialised to empty string on line 12. Rule: AuditLedger genesis hash must be str_repeat('0', 64).
-```
-
----
+## Operations documentation
+- `docs/architecture.md`
+- `docs/ci-cd.md`
+- `docs/deployment.md`
+- `docs/upgrade-rollback.md`
 
 ## Troubleshooting
-
-### Claude is reviewing fictional files / hallucinating violations
-
-**Symptom:** Claude posts a review referencing file paths and violations that don't exist in the PR.
-
-**Cause:** The diff is not reaching Claude. Either `pr.diff` is empty, or there was a variable-substitution issue in an older version of the workflow. Upgrade to the latest version of this workflow on `main`.
-
-**To diagnose**, clone this repo, edit the **Get PR diff** step in `claude-pr-review.yml`, and place the debug lines immediately after `gh pr diff` succeeds and before the empty-diff guard:
-
-```yaml
-- name: Get PR diff
-  run: |
-    # ... existing gh pr diff command ...
-    echo "Diff size: $(wc -c < pr.diff)"
-    head -50 pr.diff
-    # ... existing empty-diff guard ...
-```
-
-If `pr.diff` is empty, check:
-1. The consumer workflow grants `GITHUB_TOKEN` the required permissions via a `permissions` block: `contents: read` and `pull-requests: write`. `pull-requests: read` is sufficient for `gh pr diff`, but `pull-requests: write` is still required later to post or update the review comment.
-2. The workflow was not triggered via `workflow_dispatch` — that trigger has no associated PR and cannot produce a diff. This workflow requires a `pull_request` trigger for end-to-end review runs.
-3. Enable `ACTIONS_STEP_DEBUG=true` in the repo/org secrets for verbose `gh` output.
-
----
-
-### Workflow fails at "Get PR diff" with "PR diff is empty"
-
-The workflow now exits early with a clear error rather than sending a blank prompt to Claude. Resolve the event/PR-number or `GH_TOKEN` permission issue described above.
-
----
+### PR diff is empty
+Confirm the caller uses a `pull_request` event and grants required token permissions.
 
 ### Claude API request failed
+Verify `ANTHROPIC_API_KEY` exists and is valid in repo/org secrets.
 
-Verify `ANTHROPIC_API_KEY` is set in **Settings → Secrets → Actions** on the consumer repo or at the organisation level.
+### Unexpected review results
+Check that caller repository context files are current and relevant.
 
----
+## Maintenance
+Update `.github/workflows/claude-pr-review.yml` and corresponding docs in the same pull request.
 
-## Updating the rules
-
-Edit `.github/workflows/claude-pr-review.yml` in **this repo**. All consumer repos pick up the changes on their next PR without any action required on their side.
-
----
-
-## Repository structure
-
-```
-sparxstar-anthropic-workflow/
-├── .github/
-│   ├── instructions/
-│   │   └── claude-review.instructions.md  # IDE/Copilot context only — not loaded by the review workflow
-│   └── workflows/
-│       └── claude-pr-review.yml  # Reusable workflow (the source of truth)
-├── examples/
-│   └── consumer-workflow.yml     # Template to copy into consumer repos
-└── README.md
-```
-
----
-
-*Maintained by [Starisian Technologies](https://github.com/Starisian-Technologies)*
+Maintained by [Starisian Technologies](https://github.com/Starisian-Technologies).
