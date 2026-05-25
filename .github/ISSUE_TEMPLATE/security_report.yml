@@ -1,0 +1,30 @@
+name: Security issue (non-sensitive)
+description: Report a security concern that is safe to discuss publicly
+title: "[Security]: "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: "For sensitive vulnerabilities, do not file this form. Use SECURITY.md private channels."
+  - type: textarea
+    id: summary
+    attributes:
+      label: Security concern
+    validations:
+      required: true
+  - type: textarea
+    id: attack
+    attributes:
+      label: Attack scenario
+    validations:
+      required: true
+  - type: textarea
+    id: affected
+    attributes:
+      label: Affected files or workflow steps
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Proposed mitigation
