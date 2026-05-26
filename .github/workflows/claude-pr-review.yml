@@ -27,9 +27,11 @@ jobs:
 
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          WORKFLOW_REF="${{ github.workflow_ref }}"
+          WORKFLOW_REF="${WORKFLOW_REF:-}"
           RESOLVED_REF="${WORKFLOW_REF#*@}"
 
           if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
