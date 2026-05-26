@@ -63,6 +63,9 @@ Required:
 - `docs/upgrade-rollback.md`
 
 ## Troubleshooting
+### `not our ref` during platform docs checkout
+If a remote caller run fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref`, ensure the reusable workflow is up to date. Current versions resolve the checkout ref from `github.workflow_ref` (instead of using `github.workflow_sha`) so cross-repository calls use a valid ref in this repository.
+
 ### PR diff is empty
 Confirm the caller uses a `pull_request` event and grants required token permissions.
 

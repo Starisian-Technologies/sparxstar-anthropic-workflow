@@ -20,10 +20,32 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Resolve workflow repository ref
+        id: workflow_repo_ref
+        run: |
+          set -euo pipefail
+          WORKFLOW_REF="${{ github.workflow_ref }}"
+          RESOLVED_REF="${WORKFLOW_REF#*@}"
+
+          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
+            RESOLVED_REF="main"
+          fi
+
+          case "$RESOLVED_REF" in
+            refs/heads/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
+              ;;
+            refs/tags/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
+              ;;
+          esac
+
+          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
         id: diff
@@ -83,10 +105,10 @@ jobs:
           fi
 
       - name: Checkout platform reference docs
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-anthropic-workflow
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
           fetch-depth: 1
           path: .spx-workflow-repo
 
