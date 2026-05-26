@@ -22,9 +22,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("pull-requests: write", self.workflow)
 
     def test_diff_step_has_fail_fast_guards(self) -> None:
-        self.assertIn("No pull request number found", self.workflow)
-        self.assertIn("PR diff is empty", self.workflow)
-        self.assertIn("set -euo pipefail", self.workflow)
+        start_marker = "- name: Get PR diff"
+        end_marker = "\n      - name:"
+        start = self.workflow.index(start_marker)
+        end = self.workflow.index(end_marker, start + len(start_marker))
+        diff_step = self.workflow[start:end]
+        self.assertIn("No pull request number found", diff_step)
+        self.assertIn("PR diff is empty", diff_step)
+        self.assertIn("set -euo pipefail", diff_step)
 
     def test_diff_truncation_is_capped_and_flagged(self) -> None:
         start_marker = 'if [ "$(wc -c < pr.diff)" -gt 80000 ]; then'
