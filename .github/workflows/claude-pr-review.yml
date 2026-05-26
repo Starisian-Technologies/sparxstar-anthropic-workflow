@@ -24,6 +24,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
