@@ -21,9 +21,11 @@ jobs:
     steps:
       - name: Resolve checkout target
         id: checkout_target
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if [ -n "${{ github.event.pull_request.number || '' }}" ]; then
+          if [ -n "${PR_NUMBER}" ]; then
             echo "repository=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
             echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
           else
