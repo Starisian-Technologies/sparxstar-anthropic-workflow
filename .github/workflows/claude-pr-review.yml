@@ -19,13 +19,25 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Resolve checkout target
+        id: checkout_target
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.pull_request.number || '' }}" ]; then
+            echo "repository=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          repository: ${{ steps.checkout_target.outputs.repository }}
+          ref: ${{ steps.checkout_target.outputs.ref }}
 
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
