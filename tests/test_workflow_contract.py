@@ -27,15 +27,21 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("set -euo pipefail", self.workflow)
 
     def test_diff_truncation_is_capped_and_flagged(self) -> None:
-        self.assertIn('if [ "$(wc -c < pr.diff)" -gt 80000 ]; then', self.workflow)
-        self.assertIn('echo "truncated=true" >> "$GITHUB_OUTPUT"', self.workflow)
-        self.assertIn('echo "truncated=false" >> "$GITHUB_OUTPUT"', self.workflow)
-        self.assertIn("data.decode(\"utf-8\")", self.workflow)
+        start_marker = 'if [ "$(wc -c < pr.diff)" -gt 80000 ]; then'
+        end_marker = 'echo "truncated=false" >> "$GITHUB_OUTPUT"'
+        start = self.workflow.index(start_marker)
+        end = self.workflow.index(end_marker, start) + len(end_marker)
+        diff_block = self.workflow[start:end]
+        self.assertIn('echo "truncated=true" >> "$GITHUB_OUTPUT"', diff_block)
+        self.assertIn('data.decode("utf-8")', diff_block)
 
     def test_spec_context_truncation_is_capped_and_warned(self) -> None:
-        self.assertIn('if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then', self.workflow)
-        self.assertIn("Spec context truncated to 50KB", self.workflow)
-        self.assertIn("data.decode(\"utf-8\")", self.workflow)
+        start_marker = 'if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then'
+        end_marker = "Spec context truncated to 50KB"
+        start = self.workflow.index(start_marker)
+        end = self.workflow.index(end_marker, start) + len(end_marker)
+        spec_block = self.workflow[start:end]
+        self.assertIn('data.decode("utf-8")', spec_block)
 
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)
