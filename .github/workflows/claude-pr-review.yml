@@ -25,7 +25,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if [ -n "${PR_NUMBER}" ] && [ "${PR_NUMBER}" != "null" ]; then
+          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             echo "repository=${{ github.event.pull_request.head.repo.full_name }}" >> "$GITHUB_OUTPUT"
             echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
           else
