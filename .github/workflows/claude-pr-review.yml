@@ -24,14 +24,17 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
+          GITHUB_SHA_SAFE: ${{ github.sha }}
         run: |
           set -euo pipefail
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             echo "repository=$PR_HEAD_REPO_FULL_NAME" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ref=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
           else
-            echo "repository=${{ github.repository }}" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+            echo "repository=$GITHUB_REPOSITORY_SAFE" >> "$GITHUB_OUTPUT"
+            echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout code
