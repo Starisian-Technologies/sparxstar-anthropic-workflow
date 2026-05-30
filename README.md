@@ -1,6 +1,6 @@
-# SPARXSTAR Anthropic Workflow
+# SPARXSTAR Claude PR Review
 
-Centralized reusable GitHub Actions workflow for Claude-powered pull request review across Starisian Technologies repositories.
+Centralized reusable GitHub Actions workflow for Claude-powered pull request review to repository specs across Starisian Technologies repositories.
 
 ## What this repository provides
 - Reusable PR review workflow: `.github/workflows/claude-pr-review.yml`
