@@ -74,9 +74,10 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${PR_NUMBER:-}"
 
           if [ -z "${PR_NUMBER}" ]; then
             echo "::error::No pull request number found in the workflow event payload. This workflow requires a pull_request event; workflow_dispatch cannot fetch a PR diff."
