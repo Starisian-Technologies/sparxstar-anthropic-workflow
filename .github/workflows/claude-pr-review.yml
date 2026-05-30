@@ -315,7 +315,7 @@ jobs:
           COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
 
           EXISTING_COMMENT_ID=$(
-            gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
               --paginate \
               | jq -r --arg marker "$COMMENT_MARKER" '
                 map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
@@ -325,7 +325,7 @@ jobs:
           )
 
           if [ -n "$EXISTING_COMMENT_ID" ]; then
-            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+            gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
               --method PATCH \
               --raw-field body="$COMMENT"
           else
