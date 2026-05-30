@@ -300,6 +300,7 @@ jobs:
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIFF_TRUNCATED: ${{ steps.diff.outputs.truncated }}
         run: |
           set -euo pipefail
           REVIEW=$(cat review.txt)
@@ -307,7 +308,7 @@ jobs:
           PR_NUMBER="${{ github.event.pull_request.number }}"
           COMMENT_MARKER="<!-- claude-pr-review-comment -->"
 
-          if [ "${{ steps.diff.outputs.truncated }}" = "true" ]; then
+          if [ "$DIFF_TRUNCATED" = "true" ]; then
             TRUNCATION_NOTE="> ⚠️ **Diff truncated** — PR exceeds 80KB. Review covers the first portion only. Large PRs should be split."$'\n\n'
           fi
 
