@@ -19,11 +19,31 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Resolve checkout target
+        id: checkout_target
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
+          GITHUB_SHA_SAFE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+            echo "repository=$PR_HEAD_REPO_FULL_NAME" >> "$GITHUB_OUTPUT"
+            echo "ref=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "repository=$GITHUB_REPOSITORY_SAFE" >> "$GITHUB_OUTPUT"
+            echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
+          repository: ${{ steps.checkout_target.outputs.repository }}
+          ref: ${{ steps.checkout_target.outputs.ref }}
 
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
@@ -52,6 +72,7 @@ jobs:
       - name: Get PR diff
         id: diff
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -277,6 +298,7 @@ jobs:
 
       - name: Post review comment
         env:
+          GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
