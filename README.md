@@ -1,9 +1,9 @@
 # SPARXSTAR Anthropic Workflow
 
-Centralized reusable GitHub Actions workflow for Claude-powered pull request review across Starisian Technologies repositories.
+Centralized reusable GitHub Actions workflow for Claude-powered pull request and commit review across Starisian Technologies repositories.
 
 ## What this repository provides
-- Reusable PR review workflow: `.github/workflows/claude-pr-review.yml`
+- Reusable review workflow: `.github/workflows/claude-pr-review.yml`
 - Consumer integration example: `examples/consumer-workflow.yml`
 - Governance baseline: contributing, security, support, code ownership, issue/PR templates
 - Operational docs for architecture, CI/CD, deployment, and upgrade/rollback
@@ -18,6 +18,7 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
 
 jobs:
   review:
@@ -34,16 +35,16 @@ Required:
 - Permissions: `contents: read` and `pull-requests: write`
 
 ## Workflow behavior
-1. Loads PR diff from the caller repository.
-2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) and platform reference docs from `reference/*.md` in this workflow repository.
+1. Loads a diff from the caller repository (PR diff for `pull_request`, git diff for `push`).
+2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, root markdown files, `.github/instructions/**/*.md`, `docs/specs/**/*.md`, and additional docs/spec markdown files) plus platform reference docs from `reference/*.md` in this workflow repository.
 3. Builds deterministic prompt from diff + context.
 4. Calls Anthropic Messages API.
-5. Upserts a single review comment on the PR.
+5. Publishes the review (upserts one PR comment for pull requests; writes workflow summary for push events).
 
 ## Determinism and safeguards
-- Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- Callers should use `pull_request` and `push` triggers so every PR update and commit gets reviewed
 - Diff truncation at 80KB and context truncation at 50KB with explicit notices
-- Fail-fast handling for missing PR data, empty diff, and missing API key
+- Fail-fast handling for unsupported events, empty diffs, and missing API key
 - Scoped GitHub token permissions and no credential persistence on checkout
 
 ## Governance and standards files
@@ -66,8 +67,8 @@ Required:
 ### `not our ref` during platform docs checkout
 If a remote workflow run (in a caller repo) fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref`, ensure the reusable workflow is up to date. Current versions resolve the checkout ref from `github.workflow_ref` (instead of using `github.workflow_sha`) so cross-repository calls use a valid ref in this repository.
 
-### PR diff is empty
-Confirm the caller uses a `pull_request` event and grants required token permissions.
+### Change diff is empty
+Confirm the caller uses `pull_request` or `push`, and that the event includes code changes.
 
 ### Claude API request failed
 Verify `ANTHROPIC_API_KEY` exists and is valid in repo/org secrets.

@@ -12,7 +12,7 @@ Consumer repositories must grant:
 - `ANTHROPIC_API_KEY`
 
 ## Determinism controls
-- Consumer workflows must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- Consumer workflows should use both `pull_request` and `push` triggers so all PR updates and direct commits are reviewed
 - Diff and spec byte limits with explicit truncation notes
 - Single-comment update marker to avoid noisy comment sprawl
 
