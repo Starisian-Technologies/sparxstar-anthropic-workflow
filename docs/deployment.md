@@ -4,7 +4,7 @@
 Deployment is release-by-reference of workflow files in this repository.
 Consumer repositories import the workflow by ref:
 
-`Starisian-Technologies/sparxstar-anthropic-workflow/.github/workflows/claude-pr-review.yml@<ref>`
+`Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@<ref>`
 
 ## Safe deployment process
 1. Open PR with workflow and documentation changes.
