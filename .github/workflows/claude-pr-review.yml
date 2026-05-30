@@ -301,11 +301,12 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIFF_TRUNCATED: ${{ steps.diff.outputs.truncated }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
           REVIEW=$(cat review.txt)
           TRUNCATION_NOTE=""
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${PR_NUMBER}"
           COMMENT_MARKER="<!-- claude-pr-review-comment -->"
 
           if [ "$DIFF_TRUNCATED" = "true" ]; then
