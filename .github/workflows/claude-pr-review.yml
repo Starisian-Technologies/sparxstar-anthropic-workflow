@@ -153,6 +153,7 @@ PY
         id: declaration
         run: |
           set -euo pipefail
+          pip install pyyaml -q
           python3 - <<'PY'
 import os
 import sys
@@ -310,6 +311,10 @@ Declared scope for this repository:
   ADRs:      ${ADRS_IDS}
 
 ---
+PLATFORM REFERENCE (standards, type contracts, CI rules):
+${PLATFORM_REF}
+
+---
 REPO AGENT CONTEXT:
 ${REPO_CONTEXT}
 
@@ -402,12 +407,17 @@ import os
 import re
 from pathlib import Path
 
+def safe_read(p: str, fallback: str) -> str:
+    path = Path(p)
+    return path.read_text(encoding="utf-8") if path.exists() else fallback
+
 token_values = {
     "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
-    "${TIER_SPECS}": Path("tier_specs.txt").read_text(encoding="utf-8"),
-    "${TIER_CONTRACTS}": Path("tier_contracts.txt").read_text(encoding="utf-8"),
-    "${TIER_ADRS}": Path("tier_adrs.txt").read_text(encoding="utf-8"),
-    "${REPO_CONTEXT}": Path("repo_context.txt").read_text(encoding="utf-8"),
+    "${TIER_SPECS}": safe_read("tier_specs.txt", "# Spec tier not available."),
+    "${TIER_CONTRACTS}": safe_read("tier_contracts.txt", "# Contracts tier not available."),
+    "${TIER_ADRS}": safe_read("tier_adrs.txt", "# ADRs tier not available."),
+    "${PLATFORM_REF}": safe_read("platform_ref.txt", ""),
+    "${REPO_CONTEXT}": safe_read("repo_context.txt", ""),
     "${REPO}": os.environ["REPO"],
     "${PR_TITLE}": os.environ["PR_TITLE"],
     "${PR_NUMBER}": os.environ["PR_NUMBER"],
@@ -417,7 +427,7 @@ token_values = {
     "${ADRS_IDS}": os.environ.get("ADRS_IDS", "(none declared)"),
 }
 pattern = re.compile(
-    r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
+    r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
 )
 template = Path("prompt_template.txt").read_text(encoding="utf-8")
 prompt = pattern.sub(lambda m: token_values[m.group(0)], template)

@@ -12,6 +12,8 @@ jobs:
   #   .sparxstar/adrs/          — ADRs that govern this repo
   # Scope is read from sparxstar-specs.yml at repo root — not hardcoded here.
   fetch-specs:
+    permissions:
+      contents: read
     uses: Starisian-Technologies/sparxstar-product-specification-registry/.github/workflows/fetch-specs.yml@v1
     # No secrets block needed — read token minted from the org-level composer-resolver GitHub App.
 

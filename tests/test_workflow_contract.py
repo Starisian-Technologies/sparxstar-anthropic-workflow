@@ -71,14 +71,20 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${TIER_SPECS}": Path("tier_specs.txt").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${TIER_CONTRACTS}": Path("tier_contracts.txt").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${TIER_ADRS}": Path("tier_adrs.txt").read_text(encoding="utf-8")', self.workflow)
+        self.assertIn('"${TIER_SPECS}": safe_read("tier_specs.txt",', self.workflow)
+        self.assertIn('"${TIER_CONTRACTS}": safe_read("tier_contracts.txt",', self.workflow)
+        self.assertIn('"${TIER_ADRS}": safe_read("tier_adrs.txt",', self.workflow)
+        self.assertIn('"${PLATFORM_REF}": safe_read("platform_ref.txt",', self.workflow)
+        self.assertIn('"${REPO_CONTEXT}": safe_read("repo_context.txt",', self.workflow)
+        # Full allowlist pattern — all 13 tokens must be present
         self.assertIn(
-            r'pattern = re.compile(',
+            "DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS",
             self.workflow,
         )
-        self.assertIn("TIER_SPECS|TIER_CONTRACTS|TIER_ADRS", self.workflow)
+
+    def test_platform_ref_is_injected_into_prompt(self) -> None:
+        self.assertIn("${PLATFORM_REF}", self.workflow)
+        self.assertIn("PLATFORM REFERENCE", self.workflow)
 
     def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
         self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
