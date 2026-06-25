@@ -80,6 +80,10 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("TIER_SPECS|TIER_CONTRACTS|TIER_ADRS", self.workflow)
 
+    def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
+        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
+        self.assertIn("Unsubstituted template variables in prompt", self.workflow)
+
     def test_artifact_download_step_present_with_continue_on_error(self) -> None:
         self.assertIn("Download spec artifact", self.workflow)
         self.assertIn("actions/download-artifact@v4", self.workflow)
