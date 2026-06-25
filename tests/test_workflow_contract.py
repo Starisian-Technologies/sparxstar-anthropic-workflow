@@ -49,6 +49,42 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("ADR REGISTRY FILE", self.workflow)
         self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
 
+    def _job_blocks(self) -> tuple[str, str]:
+        # build-context is defined before review; slice the file at the two
+        # 2-space-indented job headers.
+        a_start = self.workflow.index("\n  build-context:")
+        b_start = self.workflow.index("\n  review:")
+        self.assertLess(a_start, b_start)
+        return self.workflow[a_start:b_start], self.workflow[b_start:]
+
+    def test_workflow_is_split_into_two_jobs(self) -> None:
+        self.assertIn("\n  build-context:", self.workflow)
+        self.assertIn("\n  review:", self.workflow)
+        _, review = self._job_blocks()
+        self.assertIn("needs: build-context", review)
+
+    def test_privileged_job_holds_app_key_and_never_checks_out_pr_head(self) -> None:
+        build_context, _ = self._job_blocks()
+        # The App key and token minting live in the privileged job...
+        self.assertIn("actions/create-github-app-token@v3", build_context)
+        self.assertIn("secrets.COMPOSER_RESOLVER_PRIVATE_KEY", build_context)
+        self.assertIn("actions/upload-artifact", build_context)
+        # ...which must never resolve or check out untrusted PR-head code.
+        self.assertNotIn("Resolve checkout target", build_context)
+        self.assertNotIn("steps.checkout_target.outputs.ref", build_context)
+
+    def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # The job that checks out untrusted PR-head code...
+        self.assertIn("ref: ${{ steps.checkout_target.outputs.ref }}", review)
+        # ...must not hold the App key or mint tokens...
+        self.assertNotIn("actions/create-github-app-token", review)
+        self.assertNotIn("COMPOSER_RESOLVER_PRIVATE_KEY", review)
+        # ...and receives trusted context only via artifact (never re-fetched).
+        self.assertIn("actions/download-artifact", review)
+        self.assertNotIn("Checkout ADR registry", review)
+        self.assertNotIn("Checkout product-spec registry", review)
+
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
         self.assertIn("contents: read", self.workflow)

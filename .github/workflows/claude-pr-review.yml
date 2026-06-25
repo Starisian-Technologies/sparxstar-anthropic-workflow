@@ -24,8 +24,167 @@ on:
         required: true
 
 jobs:
+  # Security model (CodeQL "checkout of untrusted code in a trusted context"):
+  # the composer-resolver GitHub App key is the most powerful credential here —
+  # it can mint cross-repo read tokens for private registries. It must never
+  # share a job with untrusted PR-head code. So the work is split:
+  #
+  #   build-context (privileged) — holds the App key, mints tokens, fetches the
+  #     ADR + product-spec registries at the pinned contract_ref, and uploads
+  #     the assembled trusted context as an artifact. It NEVER checks out the
+  #     PR head, so attacker-controllable code never runs beside the App key.
+  #
+  #   review (unprivileged) — checks out the PR head, but only ever READS those
+  #     files as data (git checkout, gh pr diff, cat into a prompt — no build,
+  #     install, or script execution). It consumes the trusted context purely
+  #     by artifact, holds only ANTHROPIC_API_KEY (which cannot touch repos),
+  #     and posts the comment. The App key is absent from this job entirely.
+  #
+  # Consumers MUST invoke this reusable workflow from a `pull_request` trigger,
+  # never `pull_request_target`: the latter would run the review job with a
+  # read-write token in the base-repo context while checking out PR-head code.
+  build-context:
+    name: Build trusted review context
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve workflow repository ref
+        id: workflow_repo_ref
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          WORKFLOW_REF="${WORKFLOW_REF:-}"
+          RESOLVED_REF="${WORKFLOW_REF#*@}"
+
+          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
+            RESOLVED_REF="main"
+          fi
+
+          case "$RESOLVED_REF" in
+            refs/heads/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
+              ;;
+            refs/tags/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
+              ;;
+          esac
+
+          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
+
+      # The ADR and product-spec registries are private; the caller's
+      # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
+      # read tokens from the composer-resolver GitHub App — one scoped to
+      # each registry — so the reviewer reads contracts without any
+      # cross-repo write or sync capability. This runs in the privileged
+      # job that never sees PR-head code.
+      - name: Validate composer-resolver configuration
+        env:
+          COMPOSER_RESOLVER_CLIENT_ID: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COMPOSER_RESOLVER_CLIENT_ID:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_CLIENT_ID variable is not set. Define it as an organization or repository variable (the composer-resolver GitHub App client id) so the workflow can mint read tokens for the private ADR and product-spec registries."
+            exit 1
+          fi
+          if [ -z "${COMPOSER_RESOLVER_PRIVATE_KEY:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_PRIVATE_KEY secret is not set. Add the composer-resolver GitHub App private key to repository or organisation secrets and pass it by name to this reusable workflow."
+            exit 1
+          fi
+
+      - name: Mint ADR read token
+        id: adr-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-architecture-governance-registry
+
+      - name: Mint spec read token
+        id: spec-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-product-specification-registry
+
+      - name: Checkout platform reference docs
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-claude-pr-review
+          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
+          fetch-depth: 1
+          path: .spx-workflow-repo
+
+      - name: Checkout ADR registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-architecture-governance-registry
+          ref: ${{ inputs.contract_ref }}
+          token: ${{ steps.adr-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-adr-registry
+
+      - name: Checkout product-spec registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-product-specification-registry
+          ref: ${{ inputs.contract_ref }}
+          token: ${{ steps.spec-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-spec-registry
+
+      - name: Assemble trusted context
+        run: |
+          set -euo pipefail
+          : > trusted_context.txt
+
+          # Authoritative contracts from the private registries, pinned to the
+          # requested contract_ref, plus the platform reference snapshot. The
+          # consuming job appends repo-local context and applies the size cap.
+          if [ -d ".spx-adr-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          if [ -d ".spx-spec-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          for f in .spx-workflow-repo/reference/*.md; do
+            if [ -f "$f" ]; then
+              printf '%s\n' "--- PLATFORM REFERENCE FILE: $f ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            fi
+          done
+
+      - name: Upload trusted context
+        uses: actions/upload-artifact@v4
+        with:
+          name: spx-trusted-context
+          path: trusted_context.txt
+          retention-days: 1
+          if-no-files-found: error
+
   review:
     name: Claude Code Review
+    needs: build-context
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -54,6 +213,9 @@ jobs:
             echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
           fi
 
+      # Untrusted PR-head code. This job only ever READS these files (the diff
+      # and markdown context); it never builds, installs, or executes anything
+      # from the checked-out tree, and it holds no cross-repo credential.
       - name: Checkout code
         uses: actions/checkout@v5
         with:
@@ -61,30 +223,6 @@ jobs:
           persist-credentials: false
           repository: ${{ steps.checkout_target.outputs.repository }}
           ref: ${{ steps.checkout_target.outputs.ref }}
-
-      - name: Resolve workflow repository ref
-        id: workflow_repo_ref
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          set -euo pipefail
-          WORKFLOW_REF="${WORKFLOW_REF:-}"
-          RESOLVED_REF="${WORKFLOW_REF#*@}"
-
-          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
-            RESOLVED_REF="main"
-          fi
-
-          case "$RESOLVED_REF" in
-            refs/heads/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
-              ;;
-            refs/tags/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
-              ;;
-          esac
-
-          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
         id: diff
@@ -145,71 +283,11 @@ jobs:
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout platform reference docs
-        uses: actions/checkout@v5
+      - name: Download trusted context
+        uses: actions/download-artifact@v4
         with:
-          repository: Starisian-Technologies/sparxstar-claude-pr-review
-          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
-          fetch-depth: 1
-          path: .spx-workflow-repo
-
-      # The ADR and product-spec registries are private; the caller's
-      # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
-      # read tokens from the composer-resolver GitHub App — one scoped to
-      # each registry — so the reviewer reads contracts without any
-      # cross-repo write or sync capability.
-      - name: Validate composer-resolver configuration
-        env:
-          COMPOSER_RESOLVER_CLIENT_ID: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
-          COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${COMPOSER_RESOLVER_CLIENT_ID:-}" ]; then
-            echo "::error::COMPOSER_RESOLVER_CLIENT_ID variable is not set. Define it as an organization or repository variable (the composer-resolver GitHub App client id) so the workflow can mint read tokens for the private ADR and product-spec registries."
-            exit 1
-          fi
-          if [ -z "${COMPOSER_RESOLVER_PRIVATE_KEY:-}" ]; then
-            echo "::error::COMPOSER_RESOLVER_PRIVATE_KEY secret is not set. Add the composer-resolver GitHub App private key to repository or organisation secrets and pass it by name to this reusable workflow."
-            exit 1
-          fi
-
-      - name: Mint ADR read token
-        id: adr-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
-          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
-          owner: Starisian-Technologies
-          repositories: sparxstar-architecture-governance-registry
-
-      - name: Mint spec read token
-        id: spec-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
-          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
-          owner: Starisian-Technologies
-          repositories: sparxstar-product-specification-registry
-
-      - name: Checkout ADR registry
-        uses: actions/checkout@v5
-        with:
-          repository: Starisian-Technologies/sparxstar-architecture-governance-registry
-          ref: ${{ inputs.contract_ref }}
-          token: ${{ steps.adr-token.outputs.token }}
-          persist-credentials: false
-          fetch-depth: 1
-          path: .spx-adr-registry
-
-      - name: Checkout product-spec registry
-        uses: actions/checkout@v5
-        with:
-          repository: Starisian-Technologies/sparxstar-product-specification-registry
-          ref: ${{ inputs.contract_ref }}
-          token: ${{ steps.spec-token.outputs.token }}
-          persist-credentials: false
-          fetch-depth: 1
-          path: .spx-spec-registry
+          name: spx-trusted-context
+          path: .spx-trusted-context
 
       - name: Load spec context
         run: |
@@ -234,32 +312,12 @@ jobs:
             fi
           done
 
-          # Authoritative contracts from the private registries, pinned to
-          # the requested contract_ref. Loaded ahead of the static reference
-          # snapshot so the live ADRs and specs survive truncation first.
-          if [ -d ".spx-adr-registry" ]; then
-            while IFS= read -r f; do
-              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> spec_context.txt
-              cat "$f" >> spec_context.txt
-              printf '\n\n' >> spec_context.txt
-            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          # Authoritative ADRs, product specs, and platform reference docs were
+          # assembled in the privileged build-context job and arrive purely as
+          # an artifact (never re-fetched here, where untrusted code lives).
+          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
+            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
           fi
-
-          if [ -d ".spx-spec-registry" ]; then
-            while IFS= read -r f; do
-              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> spec_context.txt
-              cat "$f" >> spec_context.txt
-              printf '\n\n' >> spec_context.txt
-            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
-          fi
-
-          for f in .spx-workflow-repo/reference/*.md; do
-            if [ -f "$f" ]; then
-              printf '%s\n' "--- PLATFORM REFERENCE FILE: $f ---" >> spec_context.txt
-              cat "$f" >> spec_context.txt
-              printf '\n\n' >> spec_context.txt
-            fi
-          done
 
           if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
             python3 - <<'PY'

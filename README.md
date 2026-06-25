@@ -43,19 +43,25 @@ Inputs:
 - `contract_ref` (optional, default `v1`): tag of the ADR and product-spec registries to review against. Pin to a real tag — `v1` follows the major, `v1.0.0` locks. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
 
 ## Workflow behavior
-1. Loads PR diff from the caller repository.
-2. Mints short-lived, least-privilege read tokens (one per registry) from the composer-resolver GitHub App and checks out the private ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries at `contract_ref`.
-3. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs), the authoritative ADRs and product specs from the registries, and platform reference docs from `reference/*.md` in this workflow repository.
-4. Builds deterministic prompt from diff + context.
-5. Calls Anthropic Messages API.
-6. Upserts a single review comment on the PR.
+The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Security and safeguards](#determinism-and-safeguards)):
+
+**Job `build-context` (privileged, never checks out PR-head code):**
+1. Mints short-lived, least-privilege read tokens (one per registry) from the composer-resolver GitHub App.
+2. Checks out the private ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries at `contract_ref`, plus this repo's `reference/*.md`.
+3. Assembles the authoritative ADRs, product specs, and platform reference docs into a trusted-context artifact.
+
+**Job `review` (unprivileged, holds only `ANTHROPIC_API_KEY`):**
+4. Loads the PR diff and repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) — reading PR-head files as data only, never executing them.
+5. Downloads the trusted-context artifact and builds a deterministic prompt from diff + context.
+6. Calls the Anthropic Messages API and upserts a single review comment on the PR.
 
 The reviewer only reads the registries — there is no contract-sync or write-back.
 
 ## Determinism and safeguards
-- Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- Callers must use a `pull_request` trigger — **never `pull_request_target`**. The review job checks out PR-head code, and `pull_request_target` would run it with a read-write token in the base-repo context. `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- **Privilege split (CodeQL hardening):** the composer-resolver GitHub App key — the only credential that can reach private registries — lives solely in the `build-context` job, which never checks out PR-head code. The `review` job checks out PR-head code but holds no App key and only *reads* those files as data (no build/install/script execution); trusted context crosses between jobs via artifact only
 - Diff truncation at 80KB and context truncation at 50KB with explicit notices
-- Fail-fast handling for missing PR data, empty diff, and missing API key
+- Fail-fast handling for missing PR data, empty diff, missing API key, and unset composer-resolver configuration
 - Scoped GitHub token permissions and no credential persistence on checkout
 
 ## Governance and standards files
