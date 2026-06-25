@@ -116,17 +116,17 @@ jobs:
 
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
             python3 - <<'PY'
-from pathlib import Path
-max_bytes = 80000
-source_path = Path("pr.diff")
-data = source_path.read_bytes()[:max_bytes]
-while data:
-    try:
-        data.decode("utf-8")
-        break
-    except UnicodeDecodeError:
-        data = data[:-1]
-source_path.write_bytes(data)
+          from pathlib import Path
+          max_bytes = 80000
+          source_path = Path("pr.diff")
+          data = source_path.read_bytes()[:max_bytes]
+          while data:
+              try:
+                  data.decode("utf-8")
+                  break
+              except UnicodeDecodeError:
+                  data = data[:-1]
+          source_path.write_bytes(data)
 PY
             echo "truncated=true" >> "$GITHUB_OUTPUT"
           else
@@ -146,7 +146,7 @@ PY
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.specs-artifact }}
-          path: .sparxstar/
+          path: .
         continue-on-error: true
 
       - name: Read repo declaration
@@ -155,39 +155,39 @@ PY
           set -euo pipefail
           pip install pyyaml -q
           python3 - <<'PY'
-import os
-import sys
-from pathlib import Path
+          import os
+          import sys
+          from pathlib import Path
 
-out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+          out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
 
-if not Path("sparxstar-specs.yml").exists():
-    with open(out_path, "a") as f:
-        f.write("specs_ids=(none declared)\n")
-        f.write("contracts_ids=(none declared)\n")
-        f.write("adrs_ids=(none declared)\n")
-        f.write("has_declaration=false\n")
-    sys.exit(0)
+          if not Path("sparxstar-specs.yml").exists():
+              with open(out_path, "a") as f:
+                  f.write("specs_ids=(none declared)\n")
+                  f.write("contracts_ids=(none declared)\n")
+                  f.write("adrs_ids=(none declared)\n")
+                  f.write("has_declaration=false\n")
+              sys.exit(0)
 
-try:
-    import yaml
-    with open("sparxstar-specs.yml") as f:
-        decl = yaml.safe_load(f)
-    specs = [str(s.get("id", "")) for s in (decl.get("specs") or [])]
-    contracts = [str(c.get("id", "")) for c in (decl.get("contracts") or [])]
-    adrs = [str(a.get("id", "")) for a in (decl.get("adrs") or [])]
-    with open(out_path, "a") as f:
-        f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
-        f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
-        f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
-        f.write("has_declaration=true\n")
-except Exception as e:
-    print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
-    with open(out_path, "a") as f:
-        f.write("specs_ids=(parse error)\n")
-        f.write("contracts_ids=(parse error)\n")
-        f.write("adrs_ids=(parse error)\n")
-        f.write("has_declaration=false\n")
+          try:
+              import yaml
+              with open("sparxstar-specs.yml") as f:
+                  decl = yaml.safe_load(f)
+              specs = [str(s.get("id", "")) for s in (decl.get("specs") or [])]
+              contracts = [str(c.get("id", "")) for c in (decl.get("contracts") or [])]
+              adrs = [str(a.get("id", "")) for a in (decl.get("adrs") or [])]
+              with open(out_path, "a") as f:
+                  f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
+                  f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
+                  f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
+                  f.write("has_declaration=true\n")
+          except Exception as e:
+              print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
+              with open(out_path, "a") as f:
+                  f.write("specs_ids=(parse error)\n")
+                  f.write("contracts_ids=(parse error)\n")
+                  f.write("adrs_ids=(parse error)\n")
+                  f.write("has_declaration=false\n")
 PY
 
       - name: Load three-tier context
@@ -200,18 +200,18 @@ PY
             local label="$3"
             if [ "$(wc -c < "$file")" -gt "$max_bytes" ]; then
               python3 - "$file" "$max_bytes" <<'PY'
-import sys
-from pathlib import Path
-path = Path(sys.argv[1])
-max_b = int(sys.argv[2])
-data = path.read_bytes()[:max_b]
-while data:
-    try:
-        data.decode("utf-8")
-        break
-    except UnicodeDecodeError:
-        data = data[:-1]
-path.write_bytes(data)
+          import sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          max_b = int(sys.argv[2])
+          data = path.read_bytes()[:max_b]
+          while data:
+              try:
+                  data.decode("utf-8")
+                  break
+              except UnicodeDecodeError:
+                  data = data[:-1]
+          path.write_bytes(data)
 PY
               echo "::warning::${label} tier truncated to ${max_bytes} bytes."
             fi
@@ -299,143 +299,144 @@ PY
           export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE SPECS_IDS CONTRACTS_IDS ADRS_IDS
 
           cat > prompt_template.txt <<'PROMPT_EOF'
-You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You perform three independent passes over each pull request. Findings must be attributed to the pass that caught them — do not conflate findings across passes.
+          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You perform three independent passes over each pull request. Findings must be attributed to the pass that caught them — do not conflate findings across passes.
 
-REPOSITORY: ${REPO}
-PR #${PR_NUMBER}: ${PR_TITLE}
-${TRUNCATION_LINE}
+          REPOSITORY: ${REPO}
+          PR #${PR_NUMBER}: ${PR_TITLE}
+          ${TRUNCATION_LINE}
 
-Declared scope for this repository:
-  Specs:     ${SPECS_IDS}
-  Contracts: ${CONTRACTS_IDS}
-  ADRs:      ${ADRS_IDS}
+          Declared scope for this repository:
+            Specs:     ${SPECS_IDS}
+            Contracts: ${CONTRACTS_IDS}
+            ADRs:      ${ADRS_IDS}
 
----
-PLATFORM REFERENCE (standards, type contracts, CI rules):
-${PLATFORM_REF}
+          ---
+          PLATFORM REFERENCE (standards, type contracts, CI rules):
+          ${PLATFORM_REF}
 
----
-REPO AGENT CONTEXT:
-${REPO_CONTEXT}
+          ---
+          REPO AGENT CONTEXT:
+          ${REPO_CONTEXT}
 
----
-PLATFORM-WIDE RULES (enforced in all three passes):
-- declare(strict_types=1) in every PHP file
-- No error_log() — use platform logging pattern
-- No SELECT * in any query
-- No MIT license — must be proprietary
-- No wordpress/mcp-adapter — this package does not exist on Packagist
-- No local redefinition of any type owned by sparxstar-ouroboros-integrity
-- No packages/ stub directories — sparxstar-ouroboros-integrity is published
-- No test files, stub files, or mock files unless explicitly requested
-- GovernanceTokenSigningMaterial::build() not canonicalize()
-- ContextPulse signing field order: pulse_id|context_id|device_id|session_id|site_id|network_id|trust_score_4dp|trust_level|behavior_flags_json|geo_zone|network_effective_type|session_duration|issued_at|expires
-- CI auth step must reference STARISIAN_PACKAGE_TOKEN not COPILOT_MCP_TOKEN
-- CI auth step must have fail-fast guard on empty token
-- AuditLedger genesis hash must be str_repeat('0', 64) not empty string
-- SieveKernel boot() must check did_action('muplugins_loaded') before deferring
-- GovernanceToken TTL must enforce Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS floor
-- AES-256-GCM not CBC for authenticated encryption
-- No identity_id in ContextPulse (replay attack surface)
-- behavior_flags serialized as sorted JSON array not CSV
-- FingerprintJS must be vendored script tag not bundled via npm
-- personal_policy_token must not be returned in REST response body
-- TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
-- contributor_id / contributorId never appears outside Helios (INV-010)
-- No direct writes to a graph store outside the canonical layer (INV-003)
+          ---
+          PLATFORM-WIDE RULES (enforced in all three passes):
+          - declare(strict_types=1) in every PHP file
+          - No error_log() — use platform logging pattern
+          - No SELECT * in any query
+          - No MIT license — must be proprietary
+          - No wordpress/mcp-adapter — this package does not exist on Packagist
+          - No local redefinition of any type owned by sparxstar-ouroboros-integrity
+          - No packages/ stub directories — sparxstar-ouroboros-integrity is published
+          - No test files, stub files, or mock files unless explicitly requested
+          - GovernanceTokenSigningMaterial::build() not canonicalize()
+          - ContextPulse signing field order: pulse_id|context_id|device_id|session_id|site_id|network_id|trust_score_4dp|trust_level|behavior_flags_json|geo_zone|network_effective_type|session_duration|issued_at|expires
+          - CI auth step must reference STARISIAN_PACKAGE_TOKEN not COPILOT_MCP_TOKEN
+          - CI auth step must have fail-fast guard on empty token
+          - AuditLedger genesis hash must be str_repeat('0', 64) not empty string
+          - SieveKernel boot() must check did_action('muplugins_loaded') before deferring
+          - GovernanceToken TTL must enforce Platform::GOVERNANCE_TOKEN_TTL_MIN_SECONDS floor
+          - AES-256-GCM not CBC for authenticated encryption
+          - No identity_id in ContextPulse (replay attack surface)
+          - behavior_flags serialized as sorted JSON array not CSV
+          - FingerprintJS must be vendored script tag not bundled via npm
+          - personal_policy_token must not be returned in REST response body
+          - TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
+          - contributor_id / contributorId never appears outside Helios (INV-010)
+          - No direct writes to a graph store outside the canonical layer (INV-003)
 
----
-PASS 1 — SPEC CONFORMANCE
-Governing specs: ${SPECS_IDS}
-Question: Does the diff match what this repo is specified to do?
-Look for: missing REQ-* / AC-* coverage, wrong field types, incorrect API shapes, behaviour that diverges from spec intent.
+          ---
+          PASS 1 — SPEC CONFORMANCE
+          Governing specs: ${SPECS_IDS}
+          Question: Does the diff match what this repo is specified to do?
+          Look for: missing REQ-* / AC-* coverage, wrong field types, incorrect API shapes, behaviour that diverges from spec intent.
 
-SPEC CONTENT:
-${TIER_SPECS}
+          SPEC CONTENT:
+          ${TIER_SPECS}
 
----
-PASS 2 — CONTRACT SEAM CHECK
-Governing contracts: ${CONTRACTS_IDS}
-Question: Does the diff honour what this repo owes across boundaries?
-Look for: changed emit surface, consumed field removals, broken contract assertions, type mismatches at integration points, cross-repo coupling the contract prohibits.
+          ---
+          PASS 2 — CONTRACT SEAM CHECK
+          Governing contracts: ${CONTRACTS_IDS}
+          Question: Does the diff honour what this repo owes across boundaries?
+          Look for: changed emit surface, consumed field removals, broken contract assertions, type mismatches at integration points, cross-repo coupling the contract prohibits.
 
-CONTRACT CONTENT:
-${TIER_CONTRACTS}
+          CONTRACT CONTENT:
+          ${TIER_CONTRACTS}
 
----
-PASS 3 — ADR DRIFT DETECTION
-Governing ADRs: ${ADRS_IDS}
-Question: Does the diff silently reverse a settled architectural decision?
-Look for: reintroducing patterns explicitly rejected by an ADR, violating trust-zone boundaries, ignoring identity authority rules, or bypassing a constraint an ADR made immutable.
+          ---
+          PASS 3 — ADR DRIFT DETECTION
+          Governing ADRs: ${ADRS_IDS}
+          Question: Does the diff silently reverse a settled architectural decision?
+          Look for: reintroducing patterns explicitly rejected by an ADR, violating trust-zone boundaries, ignoring identity authority rules, or bypassing a constraint an ADR made immutable.
 
-ADR CONTENT:
-${TIER_ADRS}
+          ADR CONTENT:
+          ${TIER_ADRS}
 
----
-DIFF TO REVIEW:
-${DIFF}
+          ---
+          DIFF TO REVIEW:
+          ${DIFF}
 
----
-Produce a review in the exact format below. Every section is mandatory; write "— none." if a section has no findings.
+          ---
+          Produce a review in the exact format below. Every section is mandatory; write "— none." if a section has no findings.
 
-REPOSITORY: [name]
-PR: [number and title]
+          REPOSITORY: [name]
+          PR: [number and title]
 
-VERDICT: PASS / FAIL / CONDITIONAL
+          VERDICT: PASS / FAIL / CONDITIONAL
 
-PASS 1 — SPEC CONFORMANCE (${SPECS_IDS}):
-[CRITICAL|HIGH|MEDIUM|LOW] <finding>. Rule: <REQ-NNN or spec section>.
-— none.
+          PASS 1 — SPEC CONFORMANCE (${SPECS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. Rule: <REQ-NNN or spec section>.
+          — none.
 
-PASS 2 — CONTRACT SEAM CHECK (${CONTRACTS_IDS}):
-[CRITICAL|HIGH|MEDIUM|LOW] <finding>. Contract: <id>. Surface: <field or endpoint>.
-— none.
+          PASS 2 — CONTRACT SEAM CHECK (${CONTRACTS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. Contract: <id>. Surface: <field or endpoint>.
+          — none.
 
-PASS 3 — ADR DRIFT DETECTION (${ADRS_IDS}):
-[CRITICAL|HIGH|MEDIUM|LOW] <finding>. ADR: <ADR-NNN>. Decision reversed: <brief>.
-— none.
+          PASS 3 — ADR DRIFT DETECTION (${ADRS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. ADR: <ADR-NNN>. Decision reversed: <brief>.
+          — none.
 
-WARNINGS (platform-wide rules, cross-cutting):
-[MEDIUM|LOW] <description>.
-— none.
+          WARNINGS (platform-wide rules, cross-cutting):
+          [MEDIUM|LOW] <description>.
+          — none.
 
-Be specific. Reference actual line content from the diff. Skip issues linters catch unless security-critical. Each finding must name the tier and the rule or document that triggered it.
+          Be specific. Reference actual line content from the diff. Skip issues linters catch unless security-critical. Each finding must name the tier and the rule or document that triggered it.
 PROMPT_EOF
 
           python3 - <<'PY'
-import os
-import re
-from pathlib import Path
+          import os
+          import re
+          import sys
+          from pathlib import Path
 
-def safe_read(p: str, fallback: str) -> str:
-    path = Path(p)
-    return path.read_text(encoding="utf-8") if path.exists() else fallback
+          def safe_read(p, fallback):
+              path = Path(p)
+              return path.read_text(encoding="utf-8") if path.exists() else fallback
 
-token_values = {
-    "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
-    "${TIER_SPECS}": safe_read("tier_specs.txt", "# Spec tier not available."),
-    "${TIER_CONTRACTS}": safe_read("tier_contracts.txt", "# Contracts tier not available."),
-    "${TIER_ADRS}": safe_read("tier_adrs.txt", "# ADRs tier not available."),
-    "${PLATFORM_REF}": safe_read("platform_ref.txt", ""),
-    "${REPO_CONTEXT}": safe_read("repo_context.txt", ""),
-    "${REPO}": os.environ["REPO"],
-    "${PR_TITLE}": os.environ["PR_TITLE"],
-    "${PR_NUMBER}": os.environ["PR_NUMBER"],
-    "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
-    "${SPECS_IDS}": os.environ.get("SPECS_IDS", "(none declared)"),
-    "${CONTRACTS_IDS}": os.environ.get("CONTRACTS_IDS", "(none declared)"),
-    "${ADRS_IDS}": os.environ.get("ADRS_IDS", "(none declared)"),
-}
-pattern = re.compile(
-    r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
-)
-template = Path("prompt_template.txt").read_text(encoding="utf-8")
-prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
-leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
-if leftover:
-    print(f"::error::Unsubstituted template variables in prompt: {leftover}", file=sys.stderr)
-    sys.exit(1)
-Path("prompt.txt").write_text(prompt, encoding="utf-8")
+          token_values = {
+              "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
+              "${TIER_SPECS}": safe_read("tier_specs.txt", "# Spec tier not available."),
+              "${TIER_CONTRACTS}": safe_read("tier_contracts.txt", "# Contracts tier not available."),
+              "${TIER_ADRS}": safe_read("tier_adrs.txt", "# ADRs tier not available."),
+              "${PLATFORM_REF}": safe_read("platform_ref.txt", ""),
+              "${REPO_CONTEXT}": safe_read("repo_context.txt", ""),
+              "${REPO}": os.environ["REPO"],
+              "${PR_TITLE}": os.environ["PR_TITLE"],
+              "${PR_NUMBER}": os.environ["PR_NUMBER"],
+              "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
+              "${SPECS_IDS}": os.environ.get("SPECS_IDS", "(none declared)"),
+              "${CONTRACTS_IDS}": os.environ.get("CONTRACTS_IDS", "(none declared)"),
+              "${ADRS_IDS}": os.environ.get("ADRS_IDS", "(none declared)"),
+          }
+          pattern = re.compile(
+              r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
+          )
+          template = Path("prompt_template.txt").read_text(encoding="utf-8")
+          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
+          leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
+          if leftover:
+              print(f"::error::Unsubstituted template variables in prompt: {leftover}", file=sys.stderr)
+              sys.exit(1)
+          Path("prompt.txt").write_text(prompt, encoding="utf-8")
 PY
 
           jq -n \
