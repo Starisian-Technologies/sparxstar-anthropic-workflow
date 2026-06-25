@@ -100,10 +100,11 @@ jobs so the registry credential never shares a job with untrusted PR-head code:
 - **`review`** (unprivileged) — checks out the PR head (read-only — no build,
   install, or script execution), reads the diff and repo-local context, downloads
   the trusted-context artifact, sends it all to the Anthropic Messages API, and
-  upserts a single review comment on the PR. The composer-resolver App
-  credential is **absent** from this job; `ANTHROPIC_API_KEY` is the only
-  consumer-provided secret here (it also uses the automatic `GITHUB_TOKEN` to
-  fetch the diff and post the comment).
+  upserts a single review comment on the PR. The security property of the split:
+  this job holds **no composer-resolver/contract-sync App token** — only
+  `ANTHROPIC_API_KEY` (which cannot reach repositories) and the automatic
+  `GITHUB_TOKEN`, scoped by this job's `permissions:` to `contents: read` +
+  `pull-requests: write` (read the diff, post the comment).
 
 It guarantees the PR was reviewed against the pinned ADR/spec versions. It does
 **not** run your tests, and it does **not** block merge — see Section 8.
