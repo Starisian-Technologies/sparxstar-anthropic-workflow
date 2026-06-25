@@ -80,6 +80,7 @@ The reviewer only reads the registries — there is no contract-sync or write-ba
 - `docs/ci-cd.md`
 - `docs/deployment.md`
 - `docs/upgrade-rollback.md`
+- `docs/security-notes.md` — threat model, controls, and accepted scan findings
 
 ## Troubleshooting
 ### `not our ref` during platform docs checkout

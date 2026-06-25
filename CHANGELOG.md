@@ -24,3 +24,4 @@ The format is based on Keep a Changelog and follows semantic-versioning release 
 - Validated `contract_ref` against a safe git-ref pattern before any checkout, and routed registry checkouts through the validated value.
 - Set `persist-credentials: false` on the platform-reference-docs checkout for consistency with the other checkouts.
 - Ordered the trusted ADR/spec/reference context ahead of repo-local context so the canonical contracts survive the 50KB context cap.
+- Documented the threat model, controls, and the accepted CodeQL "checkout of untrusted code in a trusted context" dismissal in `docs/security-notes.md`.
