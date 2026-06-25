@@ -257,7 +257,10 @@ reference/
   ref-*.md                 # Platform reference docs injected into the review context
 docs/
   consumer-setup.md        # This file
-  ci-cd.md, architecture.md, deployment.md, upgrade-rollback.md
+  architecture.md          # Platform architecture overview
+  ci-cd.md                 # CI/CD and workflow operations
+  deployment.md            # Deployment guidance
+  upgrade-rollback.md      # Upgrade and rollback guidance
   security-notes.md        # Threat model + accepted scan findings
 tests/
   test_workflow_contract.py  # Locks the workflow interface (secrets, inputs, pin, split)
