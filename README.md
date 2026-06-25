@@ -43,7 +43,7 @@ Inputs:
 - `contract_ref` (optional, default `v1`): tag of the ADR and product-spec registries to review against. Pin to a real tag — `v1` follows the major, `v1.0.0` locks. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
 
 ## Workflow behavior
-The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Security and safeguards](#determinism-and-safeguards)):
+The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Determinism and safeguards](#determinism-and-safeguards)):
 
 **Job `build-context` (privileged, never checks out PR-head code):**
 1. Mints short-lived, least-privilege read tokens (one per registry) from the composer-resolver GitHub App.
