@@ -76,6 +76,7 @@ The reviewer only reads the registries — there is no contract-sync or write-ba
 - `.github/ISSUE_TEMPLATE/*.yml`
 
 ## Operations documentation
+- `docs/consumer-setup.md` — how a consuming repository wires up this gate
 - `docs/architecture.md`
 - `docs/ci-cd.md`
 - `docs/deployment.md`
