@@ -49,12 +49,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.workflow)
         self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("repositories: starisian-technologies-coding-standards", self.workflow)
 
     def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
         self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("repository: Starisian-Technologies/starisian-technologies-coding-standards", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
         self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
+        self.assertIn("token: ${{ steps.standards-token.outputs.token }}", self.workflow)
         # Registry checkouts use the validated contract ref, not the raw input.
         self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
 
@@ -73,6 +76,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_registry_content_is_loaded_into_spec_context(self) -> None:
         self.assertIn("ADR REGISTRY FILE", self.workflow)
         self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
+        self.assertIn("CODING STANDARDS FILE", self.workflow)
 
     def _job_blocks(self) -> tuple[str, str]:
         # build-context is defined before review; slice the file at the two
@@ -140,6 +144,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("actions/download-artifact", review)
         self.assertNotIn("Checkout ADR registry", review)
         self.assertNotIn("Checkout product-spec registry", review)
+        self.assertNotIn("Checkout coding standards", review)
+
+    def test_spec_context_truncation_is_capped_and_warned(self) -> None:
+        start_marker = 'if [ "$(wc -c < spec_context.txt)" -gt 100000 ]; then'
+        end_marker = "Spec context truncated to 100KB"
+        start = self.workflow.index(start_marker)
+        end = self.workflow.index(end_marker, start) + len(end_marker)
+        spec_block = self.workflow[start:end]
+        self.assertIn('data.decode("utf-8")', spec_block)
+
+    def test_violations_format_includes_all_citation_types(self) -> None:
+        self.assertIn("ADR-NNN | INV-NNN | standards-doc RULE-ID | spec §section | platform rule", self.workflow)
 
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
@@ -164,14 +180,6 @@ class WorkflowContractTests(unittest.TestCase):
         diff_block = self.workflow[start:end]
         self.assertIn('echo "truncated=true" >> "$GITHUB_OUTPUT"', diff_block)
         self.assertIn('data.decode("utf-8")', diff_block)
-
-    def test_spec_context_truncation_is_capped_and_warned(self) -> None:
-        start_marker = 'if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then'
-        end_marker = "Spec context truncated to 50KB"
-        start = self.workflow.index(start_marker)
-        end = self.workflow.index(end_marker, start) + len(end_marker)
-        spec_block = self.workflow[start:end]
-        self.assertIn('data.decode("utf-8")', spec_block)
 
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)

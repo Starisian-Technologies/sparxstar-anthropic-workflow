@@ -168,6 +168,15 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
+      - name: Mint coding standards read token
+        id: standards-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: starisian-technologies-coding-standards
+
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
@@ -197,6 +206,15 @@ jobs:
           fetch-depth: 1
           path: .spx-spec-registry
 
+      - name: Checkout coding standards
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/starisian-technologies-coding-standards
+          token: ${{ steps.standards-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-standards-repo
+
       - name: Assemble trusted context
         run: |
           set -euo pipefail
@@ -219,6 +237,25 @@ jobs:
               cat "$f" >> trusted_context.txt
               printf '\n\n' >> trusted_context.txt
             done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          # Coding standards — injected after ADRs/specs, before platform reference
+          if [ -d ".spx-standards-repo/docs" ]; then
+            for f in \
+              .spx-standards-repo/docs/standards-handbook.md \
+              .spx-standards-repo/docs/enforcement-matrix.md \
+              .spx-standards-repo/docs/php-wordpress-standard.md \
+              .spx-standards-repo/docs/javascript-react-standard.md \
+              .spx-standards-repo/docs/node-standard.md \
+              .spx-standards-repo/docs/css-standard.md \
+              .spx-standards-repo/docs/media-upload-standard.md \
+              .spx-standards-repo/docs/STD-TOOLCHAIN-001.md; do
+              if [ -f "$f" ]; then
+                printf '%s\n' "--- CODING STANDARDS FILE: $(basename "$f") ---" >> trusted_context.txt
+                cat "$f" >> trusted_context.txt
+                printf '\n\n' >> trusted_context.txt
+              fi
+            done
           fi
 
           for f in .spx-workflow-repo/reference/*.md; do
@@ -380,11 +417,11 @@ jobs:
             fi
           done
 
-          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
+          if [ "$(wc -c < spec_context.txt)" -gt 100000 ]; then
             python3 - <<'PY'
           from pathlib import Path
 
-          max_bytes = 50000
+          max_bytes = 100000
           path = Path("spec_context.txt")
           data = path.read_bytes()[:max_bytes]
 
@@ -397,7 +434,7 @@ jobs:
 
           path.write_bytes(data)
           PY
-            echo "::warning::Spec context truncated to 50KB. Authoritative ADR/spec/reference context is placed first and preserved; trailing repo-local context may be truncated."
+            echo "::warning::Spec context truncated to 100KB. Trusted context (ADRs → product specs → coding standards → platform reference) is placed first and preserved; trailing repo-local context may be truncated."
           fi
 
       - name: Run Claude review
@@ -428,9 +465,17 @@ jobs:
           PR #${PR_NUMBER}: ${PR_TITLE}
           ${TRUNCATION_LINE}
 
-          PLATFORM CONTEXT, ADRs, AND PRODUCT SPECS:
-          The following context is assembled from repo-local docs, the authoritative ADR and product-spec registries, and platform reference docs. Treat ADR REGISTRY and PRODUCT SPEC REGISTRY sections as the canonical contracts.
+          PLATFORM CONTEXT, ADRs, PRODUCT SPECS, AND CODING STANDARDS:
+          The following context is assembled from the authoritative ADR registry, product-spec registry, coding standards, platform reference docs, and repo-local docs — in that order. Sections labelled ADR REGISTRY FILE, PRODUCT SPEC REGISTRY FILE, and CODING STANDARDS FILE are canonical contracts and take precedence over repo-local content.
           ${SPECS}
+
+          CITATION FORMAT:
+          When flagging a violation, always cite the authoritative source precisely:
+          - ADR violation → "Violates ADR-NNN" (from the ADR REGISTRY FILE sections above)
+          - Invariant violation → "Violates INV-NNN" (from invariants.md — always CRITICAL)
+          - Coding standard violation → "Violates <filename> <RULE-ID>" (e.g. "php-wordpress-standard.md PHP-001")
+          - Product spec violation → "Violates <spec file> §<section>"
+          - Platform-wide rule → cite the rule text directly
 
           PLATFORM-WIDE RULES (apply to every repo):
           - declare(strict_types=1) in every PHP file
@@ -466,7 +511,7 @@ jobs:
           VERDICT: PASS / FAIL / CONDITIONAL
 
           VIOLATIONS (must fix before merge):
-          [CRITICAL|HIGH] Description. Rule: [reference].
+          [CRITICAL|HIGH] Description. Rule: [ADR-NNN | INV-NNN | standards-doc RULE-ID | spec §section | platform rule].
 
           WARNINGS (should fix):
           [MEDIUM|LOW] Description.
