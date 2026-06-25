@@ -96,6 +96,34 @@ jobs:
             exit 1
           fi
 
+      # Constrain the caller-supplied contract_ref to a safe git ref shape
+      # before it reaches any checkout. The registry side still validates that
+      # the ref exists and meets the version floor; this is an input-format
+      # guard (defence in depth) and the only place contract_ref is consumed,
+      # so registry checkouts reference the validated output, not the raw input.
+      - name: Validate contract_ref
+        id: contract
+        env:
+          CONTRACT_REF: ${{ inputs.contract_ref }}
+        run: |
+          set -euo pipefail
+          CONTRACT_REF="${CONTRACT_REF:-}"
+          if [ -z "$CONTRACT_REF" ]; then
+            echo "::error::contract_ref is empty. Pass a real registry tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          case "$CONTRACT_REF" in
+            *..* | -* | *[[:space:]]*)
+              echo "::error::contract_ref '$CONTRACT_REF' is not a valid git ref. Use a tag such as v1 or v1.0.0."
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$CONTRACT_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+            echo "::error::contract_ref '$CONTRACT_REF' contains unsupported characters. Use a tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          echo "ref=$CONTRACT_REF" >> "$GITHUB_OUTPUT"
+
       - name: Mint ADR read token
         id: adr-token
         uses: actions/create-github-app-token@v3
@@ -126,7 +154,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-architecture-governance-registry
-          ref: ${{ inputs.contract_ref }}
+          ref: ${{ steps.contract.outputs.ref }}
           token: ${{ steps.adr-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
@@ -136,7 +164,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-product-specification-registry
-          ref: ${{ inputs.contract_ref }}
+          ref: ${{ steps.contract.outputs.ref }}
           token: ${{ steps.spec-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1

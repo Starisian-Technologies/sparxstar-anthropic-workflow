@@ -43,7 +43,18 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
         self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
-        self.assertIn("ref: ${{ inputs.contract_ref }}", self.workflow)
+        # Registry checkouts use the validated contract ref, not the raw input.
+        self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
+
+    def test_contract_ref_is_validated_before_checkout(self) -> None:
+        self.assertIn("Validate contract_ref", self.workflow)
+        self.assertIn("CONTRACT_REF: ${{ inputs.contract_ref }}", self.workflow)
+        self.assertIn("[A-Za-z0-9][A-Za-z0-9._/-]*", self.workflow)
+        # The raw input must not flow directly into a checkout ref.
+        self.assertNotIn("ref: ${{ inputs.contract_ref }}", self.workflow)
+        validate = self.workflow.index("Validate contract_ref")
+        adr_checkout = self.workflow.index("Checkout ADR registry")
+        self.assertLess(validate, adr_checkout)
 
     def test_registry_content_is_loaded_into_spec_context(self) -> None:
         self.assertIn("ADR REGISTRY FILE", self.workflow)
