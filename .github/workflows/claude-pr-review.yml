@@ -2,8 +2,25 @@ name: Claude PR Review (Reusable)
 
 on:
   workflow_call:
+    inputs:
+      contract_ref:
+        description: >-
+          Git ref (tag) of the ADR and product-spec registries to review
+          against. Pin to a real tag, e.g. v1 (moving major) or v1.0.0
+          (locked). The registry side validates that the ref exists and is at
+          or above the supported floor; the reviewer only requests it.
+        required: false
+        type: string
+        default: v1
     secrets:
       ANTHROPIC_API_KEY:
+        required: true
+      COMPOSER_RESOLVER_PRIVATE_KEY:
+        description: >-
+          Private key for the composer-resolver GitHub App, used to mint
+          short-lived read tokens for the private ADR and product-spec
+          registries. Pass by name (not inherit). The app's client id is read
+          from the organization variable COMPOSER_RESOLVER_CLIENT_ID.
         required: true
 
 jobs:
@@ -136,6 +153,49 @@ jobs:
           fetch-depth: 1
           path: .spx-workflow-repo
 
+      # The ADR and product-spec registries are private; the caller's
+      # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
+      # read tokens from the composer-resolver GitHub App — one scoped to
+      # each registry — so the reviewer reads contracts without any
+      # cross-repo write or sync capability.
+      - name: Mint ADR read token
+        id: adr-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-architecture-governance-registry
+
+      - name: Mint spec read token
+        id: spec-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-product-specification-registry
+
+      - name: Checkout ADR registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-architecture-governance-registry
+          ref: ${{ inputs.contract_ref }}
+          token: ${{ steps.adr-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-adr-registry
+
+      - name: Checkout product-spec registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-product-specification-registry
+          ref: ${{ inputs.contract_ref }}
+          token: ${{ steps.spec-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-spec-registry
+
       - name: Load spec context
         run: |
           set -euo pipefail
@@ -158,6 +218,25 @@ jobs:
               printf '\n\n' >> spec_context.txt
             fi
           done
+
+          # Authoritative contracts from the private registries, pinned to
+          # the requested contract_ref. Loaded ahead of the static reference
+          # snapshot so the live ADRs and specs survive truncation first.
+          if [ -d ".spx-adr-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> spec_context.txt
+              cat "$f" >> spec_context.txt
+              printf '\n\n' >> spec_context.txt
+            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          if [ -d ".spx-spec-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> spec_context.txt
+              cat "$f" >> spec_context.txt
+              printf '\n\n' >> spec_context.txt
+            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
 
           for f in .spx-workflow-repo/reference/*.md; do
             if [ -f "$f" ]; then
@@ -209,13 +288,14 @@ jobs:
           export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
 
           cat > prompt_template.txt <<'PROMPT_EOF'
-          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against platform specs and architectural standards.
+          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against the platform's architectural decision records (ADRs), product specifications, and architectural standards.
 
           REPOSITORY: ${REPO}
           PR #${PR_NUMBER}: ${PR_TITLE}
           ${TRUNCATION_LINE}
 
-          PLATFORM CONTEXT AND SPECS:
+          PLATFORM CONTEXT, ADRs, AND PRODUCT SPECS:
+          The following context is assembled from repo-local docs, the authoritative ADR and product-spec registries, and platform reference docs. Treat ADR REGISTRY and PRODUCT SPEC REGISTRY sections as the canonical contracts.
           ${SPECS}
 
           PLATFORM-WIDE RULES (apply to every repo):

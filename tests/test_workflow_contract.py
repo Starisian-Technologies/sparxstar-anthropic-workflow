@@ -16,6 +16,32 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY:", self.workflow)
         self.assertIn("required: true", self.workflow)
 
+    def test_reusable_workflow_declares_contract_ref_input(self) -> None:
+        self.assertIn("inputs:", self.workflow)
+        self.assertIn("contract_ref:", self.workflow)
+        self.assertIn("default: v1", self.workflow)
+
+    def test_reusable_workflow_requires_composer_resolver_private_key(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY:", self.workflow)
+
+    def test_workflow_mints_scoped_registry_read_tokens(self) -> None:
+        self.assertIn("actions/create-github-app-token@v3", self.workflow)
+        self.assertIn("client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}", self.workflow)
+        self.assertIn("private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.workflow)
+        self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
+        self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
+
+    def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
+        self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
+        self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
+        self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
+        self.assertIn("ref: ${{ inputs.contract_ref }}", self.workflow)
+
+    def test_registry_content_is_loaded_into_spec_context(self) -> None:
+        self.assertIn("ADR REGISTRY FILE", self.workflow)
+        self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
+
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
         self.assertIn("contents: read", self.workflow)
@@ -69,10 +95,28 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
 
+    def test_consumer_example_pins_v1_and_passes_resolver_secret(self) -> None:
+        self.assertIn("claude-pr-review.yml@v1", self.consumer_example)
+        self.assertNotIn("claude-pr-review.yml@main", self.consumer_example)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.consumer_example)
+        self.assertIn("contract_ref:", self.consumer_example)
+
+    def test_readme_pins_v1_and_documents_resolver_requirements(self) -> None:
+        self.assertIn("claude-pr-review.yml@v1", self.readme)
+        self.assertNotIn("claude-pr-review.yml@main", self.readme)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.readme)
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.readme)
+        self.assertIn("contract_ref", self.readme)
+
     def test_ci_cd_doc_matches_permission_contract(self) -> None:
         self.assertIn("contents: read", self.docs_ci_cd)
         self.assertIn("pull-requests: write", self.docs_ci_cd)
         self.assertIn("ANTHROPIC_API_KEY", self.docs_ci_cd)
+
+    def test_ci_cd_doc_documents_resolver_and_contract_ref(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.docs_ci_cd)
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.docs_ci_cd)
+        self.assertIn("contract_ref", self.docs_ci_cd)
 
 
 if __name__ == "__main__":

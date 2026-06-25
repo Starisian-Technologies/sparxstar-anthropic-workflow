@@ -24,21 +24,33 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@main
+    # Pin to @v1 (moving major) or @v1.0.0 (locked). Do not reference @main.
+    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1
+    with:
+      contract_ref: v1
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
 ```
 
 Required:
 - Secret: `ANTHROPIC_API_KEY`
+- Secret: `COMPOSER_RESOLVER_PRIVATE_KEY` (composer-resolver GitHub App private key; mints read tokens for the private ADR and product-spec registries)
+- Variable: `COMPOSER_RESOLVER_CLIENT_ID` (composer-resolver GitHub App client id; org-level variable read via the `vars` context)
 - Permissions: `contents: read` and `pull-requests: write`
+
+Inputs:
+- `contract_ref` (optional, default `v1`): tag of the ADR and product-spec registries to review against. Pin to a real tag — `v1` follows the major, `v1.0.0` locks. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
 
 ## Workflow behavior
 1. Loads PR diff from the caller repository.
-2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) and platform reference docs from `reference/*.md` in this workflow repository.
-3. Builds deterministic prompt from diff + context.
-4. Calls Anthropic Messages API.
-5. Upserts a single review comment on the PR.
+2. Mints short-lived, least-privilege read tokens (one per registry) from the composer-resolver GitHub App and checks out the private ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries at `contract_ref`.
+3. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs), the authoritative ADRs and product specs from the registries, and platform reference docs from `reference/*.md` in this workflow repository.
+4. Builds deterministic prompt from diff + context.
+5. Calls Anthropic Messages API.
+6. Upserts a single review comment on the PR.
+
+The reviewer only reads the registries — there is no contract-sync or write-back.
 
 ## Determinism and safeguards
 - Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
