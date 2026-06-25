@@ -9,10 +9,55 @@ Centralized reusable GitHub Actions workflow for Claude-powered pull request rev
 - Operational docs for architecture, CI/CD, deployment, and upgrade/rollback
 - Platform reference docs injected into review context: `reference/*.md`
 
-## Quick start for consumer repositories
-Create `.github/workflows/claude-pr-review.yml`:
+## Setup & Install (consuming repositories)
+
+Every identifier below is read from this repo's live `.github/workflows/claude-pr-review.yml` and its actual tags. The detailed companion is [`docs/consumer-setup.md`](docs/consumer-setup.md).
+
+### 0. Prerequisites (do this first — the gate cannot run without it)
+This gate mints GitHub App tokens to clone two **private** registries, so org-level setup must exist before any consumer can call it:
+
+- **GitHub App — `composer-resolver` (required).** The mint steps use `actions/create-github-app-token@v3` (`owner: Starisian-Technologies`) to mint installation tokens for `sparxstar-architecture-governance-registry` and `sparxstar-product-specification-registry`. The consuming org must have **composer-resolver** installed and scoped to **both** repos with **Contents: Read** (the gate only reads them — there is no write/push App). Verify in **org Settings → GitHub Apps → composer-resolver → Repository access**. An App existing org-wide is *not* the same as being scoped to these two repos — that mismatch is the most common silent failure.
+- **Secrets** (Settings → Secrets and variables → Actions → **Secrets**): `ANTHROPIC_API_KEY` and `COMPOSER_RESOLVER_PRIVATE_KEY`.
+- **Variable** (same screen → **Variables**, *not* Secrets): `COMPOSER_RESOLVER_CLIENT_ID` — holds the App **client-id string** (the action takes `client-id:`, not a numeric app-id). Must be a Variable; a client-id in a Secret slot, or a missing variable, fails the mint silently.
+- **Who provisions:** App install + org secret/variable creation need org-admin. A missing prerequisite surfaces as "repository not found" or an empty-credential error at the mint/checkout step — not a clear "you forgot to install the App." Check prerequisites first on any auth failure.
+
+### 1. What this gate does
+`claude-pr-review.yml` is a reusable workflow that reviews a pull request against the platform's ADRs and product specs. It fetches those contracts from the two private registries, sends the PR diff plus that context to the Anthropic Messages API, and upserts a single review comment with a PASS / FAIL / CONDITIONAL verdict. It is **advisory** — the comment is the deliverable; a FAIL verdict does not fail the job or block merge.
+
+### 2. The `uses:` line and which tag to pin
+Live tag on this repo: **`v1.0.0`** (the only tag; `git ls-remote --tags` shows nothing else — there is **no `v1` moving alias**). Pin the immutable release tag:
 
 ```yaml
+uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
+```
+
+Do not reference `@v1` (not published) or `@main` (moving branch). Future releases (`v1.1.0`, …) require a new pin.
+
+### 3. Inputs (`on.workflow_call.inputs`)
+- `contract_ref` — *optional* (`required: false`), string, default `v1.0.0`. Git ref (tag) of the ADR + product-spec **registries** to review against. Validated here only for safe ref *shape*; the registry checkout fails if the tag doesn't exist on the registries. This gate does **not** enforce a version floor. The default resolves only if the registries actually carry a `v1.0.0` tag.
+
+No outputs are declared.
+
+### 4. Secrets the consumer passes
+Both are declared `required: true`. Pass each **by name**; `secrets: inherit` is not used (pass only the named secrets the workflow needs):
+
+```yaml
+    secrets:
+      ANTHROPIC_API_KEY:             ${{ secrets.ANTHROPIC_API_KEY }}
+      COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+```
+
+The mint step pairs the secret you pass (`COMPOSER_RESOLVER_PRIVATE_KEY`) with the **org variable `COMPOSER_RESOLVER_CLIENT_ID`**, which propagates via the `vars` context — **the consumer does not pass it.**
+
+### 5. Required caller setup
+- **Trigger:** `pull_request` (the gate needs PR context and the `review` job reads PR-head code). **Never `pull_request_target`.**
+- **Minimum job permissions:** `contents: read` + `pull-requests: write`. No `actions:` scope needed (the two jobs hand off a same-run artifact).
+- **Caller repo must be private** — `build-context` refuses to run unless `github.event.repository.private == true`.
+- **Required files in the consumer repo:** none. The gate is self-contained.
+
+### 6. Minimal copy-paste caller block
+```yaml
+# .github/workflows/claude-pr-review.yml  (in your consuming repo)
 name: Claude PR Review
 
 on:
@@ -24,24 +69,16 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # Pin to the immutable release tag @v1.0.0 (platform default). @v1 is the
-    # moving major alias and is not recommended; never reference @main.
     uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
     with:
-      contract_ref: v1.0.0
+      contract_ref: v1.0.0          # ← must name a tag that exists on the registries
     secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_API_KEY:             ${{ secrets.ANTHROPIC_API_KEY }}
       COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
 ```
 
-Required:
-- Secret: `ANTHROPIC_API_KEY`
-- Secret: `COMPOSER_RESOLVER_PRIVATE_KEY` (composer-resolver GitHub App private key; mints read tokens for the private ADR and product-spec registries)
-- Variable: `COMPOSER_RESOLVER_CLIENT_ID` (composer-resolver GitHub App client id; org-level variable read via the `vars` context)
-- Permissions: `contents: read` and `pull-requests: write`
-
-Inputs:
-- `contract_ref` (optional, default `v1.0.0`): tag of the ADR and product-spec registries to review against. Pin to the immutable release tag (`v1.0.0`, the platform default); `v1` is the moving major alias and is not the recommended pin, and never use `main`. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
+### 7. The sequencing rule (cross-repo)
+Secrets don't auto-inherit across the `workflow_call` boundary: this reusable workflow must **declare** a secret under `on.workflow_call.secrets` before a consumer can pass it, and this repo must **re-tag** afterward so the pinned tag contains the declaration. The current `v1.0.0` tag points at the `main` commit that declares `ANTHROPIC_API_KEY` and `COMPOSER_RESOLVER_PRIVATE_KEY`, so a consumer pinning `@v1.0.0` and passing both is consistent.
 
 ## Workflow behavior
 The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Determinism and safeguards](#determinism-and-safeguards)):
