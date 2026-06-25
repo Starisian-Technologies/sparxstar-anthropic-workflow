@@ -15,9 +15,10 @@ comment with a `PASS` / `FAIL` / `CONDITIONAL` verdict; it does not block merge
 on its own. Setup/runtime errors (missing secret, public caller, bad
 `contract_ref`) fail the job hard; a `FAIL` *verdict* does not.
 
-Three refs it touches: only **`contract_ref`** — the pinned registry version the
-review is performed against. (There is no agent-ref/release-ref here; this gate
-reviews, it doesn't fetch specs into your tree.)
+Consumers configure a **single ref**: `contract_ref` — the pinned registry
+version the review is performed against. (Unlike the tech-spec gate's three-ref
+model, this gate has no agent-ref/release-ref; it reviews, it doesn't fetch
+specs into your tree.)
 
 ---
 
@@ -54,30 +55,33 @@ that artifact is downloadable by anyone, so `build-context` refuses to run
 unless `github.event.repository.private == true`. Run this gate only from
 private repositories.
 
-**Org Secrets** (Settings → Secrets and variables → Actions → Secrets) — exact
-names from `on.workflow_call.secrets`:
+**Secrets** (Settings → Secrets and variables → Actions → Secrets) — exact names
+from `on.workflow_call.secrets`. Set at the **organization** level (recommended,
+so every consuming repo shares one source) or per **repository**; either scope
+resolves:
 
 | Secret | Required | Used for |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic Messages API key — the review call |
 | `COMPOSER_RESOLVER_PRIVATE_KEY` | Yes | Private key for the composer-resolver App (mints the registry read tokens) |
 
-**Org Variables** (same screen → Variables, **not** Secrets) — read by the mint
-steps:
+**Variables** (same screen → Variables, **not** Secrets) — read by the mint
+steps. Likewise organization- or repository-scoped:
 
 | Variable | Holds | Used for |
 | --- | --- | --- |
 | `COMPOSER_RESOLVER_CLIENT_ID` | the App client-id string (`create-github-app-token@v3` uses `client-id:`, not a numeric app-id) | read-token mint |
 
 These are **Variables, not Secrets** — a client-id placed in a Secret slot (or a
-private key placed in a Variable) fails the mint. Org Variables propagate into a
+private key placed in a Variable) fails the mint. Variables propagate into a
 reusable workflow automatically; secrets do not (see Section 7).
 
 **The `v1.0.0` tag of this repo must exist** so the `uses:` pin resolves. It
 does (the platform release tag is cut).
 
-**Who provisions these:** App installation and org Secret/Variable creation
-require org-admin rights. A consuming-repo developer may not have them and may
+**Who provisions these:** installing the App and creating organization-level
+secrets/variables require org-admin rights (repository-level secrets/variables
+need repo admin). A consuming-repo developer may not have them and may
 need to request setup. Check these prerequisites first when an auth error
 appears — the failure surfaces as *repository not found* or an empty-credential
 error, never as a clear "you forgot to install the App."
@@ -96,7 +100,10 @@ jobs so the registry credential never shares a job with untrusted PR-head code:
 - **`review`** (unprivileged) — checks out the PR head (read-only — no build,
   install, or script execution), reads the diff and repo-local context, downloads
   the trusted-context artifact, sends it all to the Anthropic Messages API, and
-  upserts a single review comment on the PR. Holds only `ANTHROPIC_API_KEY`.
+  upserts a single review comment on the PR. The composer-resolver App
+  credential is **absent** from this job; `ANTHROPIC_API_KEY` is the only
+  consumer-provided secret here (it also uses the automatic `GITHUB_TOKEN` to
+  fetch the diff and post the comment).
 
 It guarantees the PR was reviewed against the pinned ADR/spec versions. It does
 **not** run your tests, and it does **not** block merge — see Section 8.
@@ -123,15 +130,17 @@ production.**
 
 | Input | Required | Type | Default | Purpose / valid values |
 | --- | --- | --- | --- | --- |
-| `contract_ref` | No | string | `v1.0.0` | Registry tag (ADR + product-spec) the review is performed against. Pin the immutable release tag (`v1.0.0`); `v1` is the moving alias and is not recommended; never `main`. Validated by the gate (safe-character regex + `git check-ref-format`) and by the registry side (must exist and be at/above the floor) — a non-existent or below-floor ref hard-fails the build. |
+| `contract_ref` | No | string | `v1.0.0` | Registry tag (ADR + product-spec) the review is performed against. Pin the immutable release tag (`v1.0.0`); `v1` is the moving alias and is not recommended; never `main`. The gate validates it for **safe ref shape** (a character allowlist + `git check-ref-format`); a malformed ref hard-fails the `Validate contract_ref` step. **Existence** is enforced indirectly — the registry checkout fails if the tag doesn't exist. This gate does **not** perform a registry version-floor check (that policy lives in the tech-spec gate's `fetch-specs.yml`, which this reviewer does not invoke — it checks out the registries directly). |
 
 Outputs: none. The gate's product is the PR review comment, not a workflow
 output.
 
 ### Section 4 — Secrets the consumer must pass
 
-Declared in `on.workflow_call.secrets`. Pass each **by name** — `secrets: inherit`
-is prohibited (pass only the named secrets a workflow needs):
+Declared in `on.workflow_call.secrets`. Pass each **by name**, and do not use
+`secrets: inherit` — platform convention is to pass only the named secrets a
+workflow needs (GitHub Actions permits `inherit`; the platform's least-privilege
+policy is to avoid it):
 
 ```yaml
     secrets:
@@ -143,7 +152,7 @@ is prohibited (pass only the named secrets a workflow needs):
   review call.
 - `COMPOSER_RESOLVER_PRIVATE_KEY` — **required.** Private key for the
   composer-resolver App. The mint steps pair it with the `COMPOSER_RESOLVER_CLIENT_ID`
-  org Variable, which propagates on its own — you pass only the private key
+  variable, which propagates on its own — you pass only the private key
   across the `workflow_call` boundary.
 
 ### Section 5 — Required caller setup
@@ -151,8 +160,16 @@ is prohibited (pass only the named secrets a workflow needs):
 **Trigger:** call from `pull_request` (and/or its types). Use `pull_request`,
 **never `pull_request_target`**: the `review` job checks out PR-head code, and
 `pull_request_target` would run that in the base-repo context with a read-write
-token. Under `pull_request`, fork PRs run with a read-only token and no secrets,
-and the review job only ever *reads* PR-head files as data.
+token. The review job only ever *reads* PR-head files as data (no build,
+install, or execution).
+
+Note on forks: under `pull_request`, a fork PR does **not** receive the
+repository/organization secrets, so on a fork PR the gate fails fast at its
+config guard (missing `ANTHROPIC_API_KEY` / `COMPOSER_RESOLVER_PRIVATE_KEY`)
+rather than producing a review. In practice this gate reviews
+**same-repository (branch) PRs**; a fork PR can't be reviewed because the
+registry credential isn't available to it. (That same secret isolation is part
+of why `pull_request` is safe.)
 
 **Minimum permissions for the calling job:**
 
@@ -192,7 +209,7 @@ jobs:
     # moving major alias and is not recommended; never reference @main.
     uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
     with:
-      contract_ref: v1.0.0           # ← a real registry tag (v1.0.0 is the current floor)
+      contract_ref: v1.0.0           # ← a real registry tag (immutable release; the checkout fails if it doesn't exist)
     secrets:
       ANTHROPIC_API_KEY:             ${{ secrets.ANTHROPIC_API_KEY }}
       COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
@@ -200,8 +217,8 @@ jobs:
 
 ### Section 7 — The sequencing rule (cross-repo)
 
-Org Variables propagate into a reusable workflow automatically, but **secrets do
-not cross the `workflow_call` boundary** — this workflow must declare a secret
+Variables (organization- or repository-scoped) propagate into a reusable
+workflow automatically, but **secrets do not cross the `workflow_call` boundary** — this workflow must declare a secret
 under `on.workflow_call.secrets` before any consumer can pass it, and this repo
 must re-tag after such an edit so the pinned tag (`v1.0.0`) actually contains the
 declaration. If a consumer passes a secret the pinned tag doesn't yet declare,
@@ -220,7 +237,8 @@ signal for humans, not a hard gate.
 What *does* hard-fail the job (unconditionally — these are setup/contract errors,
 not verdicts): a missing `ANTHROPIC_API_KEY` or `COMPOSER_RESOLVER_PRIVATE_KEY`,
 an unset `COMPOSER_RESOLVER_CLIENT_ID`, a public caller repository, a missing PR
-context, and a `contract_ref` that is malformed or below the registry floor.
+context, a `contract_ref` that is malformed (fails safe-ref validation), and a
+`contract_ref` naming a tag that doesn't exist (the registry checkout fails).
 
 To make conformance *blocking*, the consumer adds its own gate (e.g. branch
 protection requiring your conformance tests, or requiring this review comment to
@@ -235,7 +253,7 @@ deliberately; never wire a hard block on a repo that isn't clean yet.
 | Guarantee | Mechanism |
 | --- | --- |
 | The PR was reviewed against the declared ADR/spec versions | `build-context` fetch at `contract_ref` + Claude review |
-| The requested `contract_ref` exists and is at/above the supported floor | `Validate contract_ref` (regex + `git check-ref-format`) + registry version-policy |
+| The requested `contract_ref` is a safe ref and (if it doesn't exist) fails closed | `Validate contract_ref` (regex + `git check-ref-format`); existence enforced by the registry checkout failing on a missing tag |
 | Private registry content never leaks to a public caller | public-caller fail-fast guard |
 | The registry credential never shares a job with untrusted PR code | two-job privilege split; `persist-credentials: false` on all checkouts |
 | A single, updated review comment (no comment sprawl) | upsert by marker |
