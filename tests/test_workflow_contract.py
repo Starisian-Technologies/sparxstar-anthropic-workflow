@@ -24,6 +24,13 @@ class WorkflowContractTests(unittest.TestCase):
     def test_reusable_workflow_requires_composer_resolver_private_key(self) -> None:
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY:", self.workflow)
 
+    def test_workflow_validates_resolver_config_before_minting(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID variable is not set", self.workflow)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY secret is not set", self.workflow)
+        validate = self.workflow.index("Validate composer-resolver configuration")
+        mint = self.workflow.index("Mint ADR read token")
+        self.assertLess(validate, mint)
+
     def test_workflow_mints_scoped_registry_read_tokens(self) -> None:
         self.assertIn("actions/create-github-app-token@v3", self.workflow)
         self.assertIn("client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}", self.workflow)

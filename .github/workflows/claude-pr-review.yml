@@ -158,6 +158,21 @@ jobs:
       # read tokens from the composer-resolver GitHub App — one scoped to
       # each registry — so the reviewer reads contracts without any
       # cross-repo write or sync capability.
+      - name: Validate composer-resolver configuration
+        env:
+          COMPOSER_RESOLVER_CLIENT_ID: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COMPOSER_RESOLVER_CLIENT_ID:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_CLIENT_ID variable is not set. Define it as an organization or repository variable (the composer-resolver GitHub App client id) so the workflow can mint read tokens for the private ADR and product-spec registries."
+            exit 1
+          fi
+          if [ -z "${COMPOSER_RESOLVER_PRIVATE_KEY:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_PRIVATE_KEY secret is not set. Add the composer-resolver GitHub App private key to repository or organisation secrets and pass it by name to this reusable workflow."
+            exit 1
+          fi
+
       - name: Mint ADR read token
         id: adr-token
         uses: actions/create-github-app-token@v3
