@@ -494,7 +494,7 @@ jobs:
           PY
 
           jq -n \
-            --arg model "claude-sonnet-4-20250514" \
+            --arg model "claude-sonnet-4-6" \
             --argjson max_tokens 4096 \
             --rawfile content prompt.txt \
             '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
