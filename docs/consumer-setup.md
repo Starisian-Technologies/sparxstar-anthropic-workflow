@@ -119,12 +119,12 @@ Live tags:
 
 | Tag | Kind | Use it when |
 | --- | --- | --- |
-| `v1.0.0` | Immutable release — never moves | **Platform default.** Frozen, reproducible workflow version. It is the only published tag. |
+| `v1.0.0` | Immutable release — never moves | **Current platform default.** Frozen, reproducible workflow version. |
 
-**Pin `@v1.0.0`.** It is the only published tag (`git ls-remote --tags` shows
-nothing else) — there is **no `@v1` moving alias**. Bumping the pin to a future
-release (`v1.1.0`, …) is a deliberate adoption act. **Never pin `@main` in
-production.**
+**Pin an immutable release tag** (current platform default: `@v1.0.0`). There is
+**no `@v1` moving alias** published — don't assume `@v1` resolves; pin a specific
+release tag. Bumping the pin to a future release (`v1.1.0`, …) is a deliberate
+adoption act. **Never pin `@main` in production.**
 
 ### Section 3 — Inputs (from `on.workflow_call.inputs`)
 
