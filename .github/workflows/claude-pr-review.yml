@@ -6,12 +6,13 @@ on:
       contract_ref:
         description: >-
           Git ref (tag) of the ADR and product-spec registries to review
-          against. Pin to a real tag, e.g. v1 (moving major) or v1.0.0
-          (locked). The registry side validates that the ref exists and is at
-          or above the supported floor; the reviewer only requests it.
+          against. Pin to the immutable release tag, e.g. v1.0.0 (the platform
+          default); v1 is the moving major alias and is not the recommended
+          pin. Never use main. The registry side validates that the ref exists
+          and is at or above the supported floor; the reviewer only requests it.
         required: false
         type: string
-        default: v1
+        default: v1.0.0
     secrets:
       ANTHROPIC_API_KEY:
         required: true

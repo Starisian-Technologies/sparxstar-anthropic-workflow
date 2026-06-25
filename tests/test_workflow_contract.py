@@ -19,7 +19,8 @@ class WorkflowContractTests(unittest.TestCase):
     def test_reusable_workflow_declares_contract_ref_input(self) -> None:
         self.assertIn("inputs:", self.workflow)
         self.assertIn("contract_ref:", self.workflow)
-        self.assertIn("default: v1", self.workflow)
+        # Default is the immutable release tag, not the moving major alias.
+        self.assertIn("default: v1.0.0", self.workflow)
 
     def test_reusable_workflow_requires_composer_resolver_private_key(self) -> None:
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY:", self.workflow)
@@ -182,14 +183,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
 
-    def test_consumer_example_pins_v1_and_passes_resolver_secret(self) -> None:
-        self.assertIn("claude-pr-review.yml@v1", self.consumer_example)
+    def test_consumer_example_pins_immutable_tag_and_passes_resolver_secret(self) -> None:
+        # Platform convention: pin the immutable release tag, not @v1 or @main.
+        self.assertIn("claude-pr-review.yml@v1.0.0", self.consumer_example)
         self.assertNotIn("claude-pr-review.yml@main", self.consumer_example)
+        self.assertNotIn("claude-pr-review.yml@v1\n", self.consumer_example)
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.consumer_example)
-        self.assertIn("contract_ref:", self.consumer_example)
+        self.assertIn("contract_ref: v1.0.0", self.consumer_example)
 
-    def test_readme_pins_v1_and_documents_resolver_requirements(self) -> None:
-        self.assertIn("claude-pr-review.yml@v1", self.readme)
+    def test_readme_pins_immutable_tag_and_documents_resolver_requirements(self) -> None:
+        self.assertIn("claude-pr-review.yml@v1.0.0", self.readme)
         self.assertNotIn("claude-pr-review.yml@main", self.readme)
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.readme)
         self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.readme)

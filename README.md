@@ -24,10 +24,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # Pin to @v1 (moving major) or @v1.0.0 (locked). Do not reference @main.
-    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1
+    # Pin to the immutable release tag @v1.0.0 (platform default). @v1 is the
+    # moving major alias and is not recommended; never reference @main.
+    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
     with:
-      contract_ref: v1
+      contract_ref: v1.0.0
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
@@ -40,7 +41,7 @@ Required:
 - Permissions: `contents: read` and `pull-requests: write`
 
 Inputs:
-- `contract_ref` (optional, default `v1`): tag of the ADR and product-spec registries to review against. Pin to a real tag — `v1` follows the major, `v1.0.0` locks. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
+- `contract_ref` (optional, default `v1.0.0`): tag of the ADR and product-spec registries to review against. Pin to the immutable release tag (`v1.0.0`, the platform default); `v1` is the moving major alias and is not the recommended pin, and never use `main`. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
 
 ## Workflow behavior
 The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Determinism and safeguards](#determinism-and-safeguards)):
