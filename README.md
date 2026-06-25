@@ -60,7 +60,8 @@ The reviewer only reads the registries — there is no contract-sync or write-ba
 ## Determinism and safeguards
 - Callers must use a `pull_request` trigger — **never `pull_request_target`**. The review job checks out PR-head code, and `pull_request_target` would run it with a read-write token in the base-repo context. `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
 - **Privilege split (CodeQL hardening):** the composer-resolver GitHub App key — the only credential that can reach private registries — lives solely in the `build-context` job, which never checks out PR-head code. The `review` job checks out PR-head code but holds no App key and only *reads* those files as data (no build/install/script execution); trusted context crosses between jobs via artifact only
-- Diff truncation at 80KB and context truncation at 50KB with explicit notices
+- **Private callers only:** the trusted context (private ADR/spec content) is staged as a workflow artifact, which would be downloadable by anyone on a public repository. `build-context` fails fast (before minting any token) unless the caller repository is private
+- Diff truncation at 80KB and context truncation at 50KB with explicit notices; authoritative ADR/spec/reference context is placed first so it survives the cap, and trailing repo-local context is truncated first
 - Fail-fast handling for missing PR data, empty diff, missing API key, and unset composer-resolver configuration
 - Scoped GitHub token permissions and no credential persistence on checkout
 

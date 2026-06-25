@@ -84,6 +84,29 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("Resolve checkout target", build_context)
         self.assertNotIn("steps.checkout_target.outputs.ref", build_context)
 
+    def test_build_context_refuses_public_caller(self) -> None:
+        build_context, _ = self._job_blocks()
+        self.assertIn("Guard against public caller repository", build_context)
+        self.assertIn("github.event.repository.private", build_context)
+        # The guard must run before any token is minted.
+        guard = build_context.index("Guard against public caller repository")
+        mint = build_context.index("Mint ADR read token")
+        self.assertLess(guard, mint)
+
+    def test_all_checkouts_disable_credential_persistence(self) -> None:
+        checkouts = self.workflow.count("uses: actions/checkout@v5")
+        persist_false = self.workflow.count("persist-credentials: false")
+        self.assertGreaterEqual(checkouts, 4)
+        self.assertEqual(checkouts, persist_false)
+
+    def test_trusted_context_loaded_before_repo_local(self) -> None:
+        _, review = self._job_blocks()
+        trusted = review.index("cat .spx-trusted-context/trusted_context.txt")
+        repo_local = review.index("REPO-LOCAL FILE: AGENTS.md")
+        # Trusted, canonical context must precede repo-local context so it
+        # survives the 50KB cap.
+        self.assertLess(trusted, repo_local)
+
     def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
         _, review = self._job_blocks()
         # The job that checks out untrusted PR-head code...

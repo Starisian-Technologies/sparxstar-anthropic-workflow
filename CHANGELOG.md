@@ -20,3 +20,7 @@ The format is based on Keep a Changelog and follows semantic-versioning release 
 ### Security
 - Split the workflow into two jobs so the composer-resolver GitHub App key never shares a job with untrusted PR-head code (resolves CodeQL "checkout of untrusted code in a trusted context"). `build-context` (privileged) mints tokens and fetches the registries but never checks out PR-head code; `review` (unprivileged) checks out PR-head code — read-only, never executed — holds only `ANTHROPIC_API_KEY`, and consumes the trusted context via artifact. Consumers must invoke from `pull_request`, never `pull_request_target`.
 - Added a fail-fast preflight guard for missing `COMPOSER_RESOLVER_CLIENT_ID` / `COMPOSER_RESOLVER_PRIVATE_KEY` configuration.
+- `build-context` refuses to run on non-private caller repositories (before minting any token), since the trusted-context artifact would otherwise leak private registry content on a public repo.
+- Validated `contract_ref` against a safe git-ref pattern before any checkout, and routed registry checkouts through the validated value.
+- Set `persist-credentials: false` on the platform-reference-docs checkout for consistency with the other checkouts.
+- Ordered the trusted ADR/spec/reference context ahead of repo-local context so the canonical contracts survive the 50KB context cap.

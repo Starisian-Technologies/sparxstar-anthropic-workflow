@@ -51,6 +51,24 @@ jobs:
       contents: read
 
     steps:
+      # This reviewer reads private ADR/product-spec registries and stages the
+      # assembled contents as a workflow artifact for the review job. On a
+      # public repository, Actions artifacts are downloadable by anyone, which
+      # would leak private registry content. Refuse to run (before any token is
+      # minted or private content fetched) unless the caller repository is
+      # private. Fails closed: an absent/empty privacy flag is treated as not
+      # private.
+      - name: Guard against public caller repository
+        env:
+          REPO_IS_PRIVATE: ${{ github.event.repository.private }}
+          REPO_FULL_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${REPO_IS_PRIVATE:-}" != "true" ]; then
+            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads private ADR and product-spec registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
+            exit 1
+          fi
+
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
         env:
@@ -147,6 +165,7 @@ jobs:
         with:
           repository: Starisian-Technologies/sparxstar-claude-pr-review
           ref: ${{ steps.workflow_repo_ref.outputs.ref }}
+          persist-credentials: false
           fetch-depth: 1
           path: .spx-workflow-repo
 
@@ -322,30 +341,36 @@ jobs:
           set -euo pipefail
           : > spec_context.txt
 
+          # Authoritative ADRs, product specs, and platform reference docs were
+          # assembled in the privileged build-context job and arrive purely as
+          # an artifact (never re-fetched here, where untrusted code lives).
+          # Written FIRST so the canonical contracts survive the size cap; the
+          # repo-local (untrusted PR) context below is appended and is what gets
+          # truncated if anything does.
+          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
+            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
           if [ -f "AGENTS.md" ]; then
+            printf '%s\n' "--- REPO-LOCAL FILE: AGENTS.md ---" >> spec_context.txt
             cat AGENTS.md >> spec_context.txt
             printf '\n\n' >> spec_context.txt
           fi
 
           if [ -f ".github/copilot-instructions.md" ]; then
+            printf '%s\n' "--- REPO-LOCAL FILE: .github/copilot-instructions.md ---" >> spec_context.txt
             cat .github/copilot-instructions.md >> spec_context.txt
             printf '\n\n' >> spec_context.txt
           fi
 
           for f in *.md docs/*.md specs/*.md; do
             if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
-              printf '%s\n' "--- FILE: $f ---" >> spec_context.txt
+              printf '%s\n' "--- REPO-LOCAL FILE: $f ---" >> spec_context.txt
               cat "$f" >> spec_context.txt
               printf '\n\n' >> spec_context.txt
             fi
           done
-
-          # Authoritative ADRs, product specs, and platform reference docs were
-          # assembled in the privileged build-context job and arrive purely as
-          # an artifact (never re-fetched here, where untrusted code lives).
-          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
-            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
-          fi
 
           if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
             python3 - <<'PY'
@@ -364,7 +389,7 @@ jobs:
 
           path.write_bytes(data)
           PY
-            echo "::warning::Spec context truncated to 50KB. Consumer repo spec files are large; ensure the most important context appears first."
+            echo "::warning::Spec context truncated to 50KB. Authoritative ADR/spec/reference context is placed first and preserved; trailing repo-local context may be truncated."
           fi
 
       - name: Run Claude review
