@@ -16,6 +16,7 @@ The format is based on Keep a Changelog and follows semantic-versioning release 
 - Reusable workflow hardened for deterministic PR usage (`workflow_call` only, concurrency control, timeout, restricted checkout credentials, fail-fast shell mode).
 - README updated with governance and operations references.
 - Consumer example and README now pin the reusable workflow at the immutable release tag `@v1.0.0` (the platform default; `@v1` is the moving major alias and is not the recommended pin) and pass `COMPOSER_RESOLVER_PRIVATE_KEY` by name. `contract_ref` defaults to `v1.0.0` to match the registry version-policy convention.
+- Bumped the review model from the deprecated `claude-sonnet-4-20250514` snapshot to the current `claude-sonnet-4-6`.
 
 ### Security
 - Split the workflow into two jobs so the composer-resolver GitHub App key never shares a job with untrusted PR-head code (resolves CodeQL "checkout of untrusted code in a trusted context"). `build-context` (privileged) mints tokens and fetches the registries but never checks out PR-head code; `review` (unprivileged) checks out PR-head code — read-only, never executed — holds only `ANTHROPIC_API_KEY`, and consumes the trusted context via artifact. Consumers must invoke from `pull_request`, never `pull_request_target`.

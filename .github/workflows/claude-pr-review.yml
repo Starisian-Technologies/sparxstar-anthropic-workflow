@@ -8,8 +8,10 @@ on:
           Git ref (tag) of the ADR and product-spec registries to review
           against. Pin to the immutable release tag, e.g. v1.0.0 (the platform
           default); v1 is the moving major alias and is not the recommended
-          pin. Never use main. The registry side validates that the ref exists
-          and is at or above the supported floor; the reviewer only requests it.
+          pin. Never use main. Validated here only for safe ref shape; the
+          registry checkout fails if the tag does not exist. This reviewer does
+          not enforce a version floor — that is the job of the fetch/version
+          gates, not this judgment layer.
         required: false
         type: string
         default: v1.0.0
@@ -116,10 +118,11 @@ jobs:
           fi
 
       # Constrain the caller-supplied contract_ref to a safe git ref shape
-      # before it reaches any checkout. The registry side still validates that
-      # the ref exists and meets the version floor; this is an input-format
-      # guard (defence in depth) and the only place contract_ref is consumed,
-      # so registry checkouts reference the validated output, not the raw input.
+      # before it reaches any checkout. This is an input-format guard only; the
+      # registry checkout below fails if the tag does not exist. Version-floor
+      # enforcement is NOT done here — it lives in the fetch/version-drift gates,
+      # not in this judgment layer. This is the only place contract_ref is
+      # consumed, so registry checkouts reference the validated output.
       - name: Validate contract_ref
         id: contract
         env:
@@ -491,7 +494,7 @@ jobs:
           PY
 
           jq -n \
-            --arg model "claude-sonnet-4-20250514" \
+            --arg model "claude-sonnet-4-6" \
             --argjson max_tokens 4096 \
             --rawfile content prompt.txt \
             '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
