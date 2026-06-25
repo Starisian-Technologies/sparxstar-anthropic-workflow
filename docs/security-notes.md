@@ -37,8 +37,17 @@ structured so they never do.
 
 ## Accepted finding: CodeQL "Checkout of untrusted code in a trusted context"
 
-**Status:** dismissed in the Security tab as a false positive (alerts #8 and
-#16, and any later re-fire of the same query against the `build-context` job).
+**Identify by query + location, not alert number.** Alert IDs are not stable
+(they change as alerts are dismissed/reopened, rules change, or the query
+re-fires), so this finding is identified by the query name —
+*Checkout of untrusted code in a trusted context* (`actions/unsafe-checkout`) —
+and its location: the **`build-context`** job of
+`.github/workflows/claude-pr-review.yml`, on the registry-checkout / token-mint
+steps whose ref derives from `inputs.contract_ref`.
+
+**Status:** dismissed in the Security tab as a false positive — this query
+against the `build-context` job, including any later re-fire (which may surface
+under a new alert number).
 
 **Why it fires.** CodeQL flags `build-context` because it is privileged (mints
 tokens with a secret) and performs a checkout whose ref derives from

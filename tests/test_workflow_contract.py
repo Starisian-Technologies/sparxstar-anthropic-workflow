@@ -50,6 +50,8 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Validate contract_ref", self.workflow)
         self.assertIn("CONTRACT_REF: ${{ inputs.contract_ref }}", self.workflow)
         self.assertIn("[A-Za-z0-9][A-Za-z0-9._/-]*", self.workflow)
+        # Plus Git's own ref-name rules (rejects .lock, //, trailing /, ..).
+        self.assertIn("git check-ref-format --allow-onelevel", self.workflow)
         # The raw input must not flow directly into a checkout ref.
         self.assertNotIn("ref: ${{ inputs.contract_ref }}", self.workflow)
         validate = self.workflow.index("Validate contract_ref")

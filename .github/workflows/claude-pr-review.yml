@@ -130,14 +130,18 @@ jobs:
             echo "::error::contract_ref is empty. Pass a real registry tag such as v1 or v1.0.0."
             exit 1
           fi
-          case "$CONTRACT_REF" in
-            *..* | -* | *[[:space:]]*)
-              echo "::error::contract_ref '$CONTRACT_REF' is not a valid git ref. Use a tag such as v1 or v1.0.0."
-              exit 1
-              ;;
-          esac
+          # Safe character subset first: rules out shell metacharacters, a
+          # leading dash (option injection), and whitespace before the value is
+          # ever passed to another command.
           if ! printf '%s' "$CONTRACT_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
             echo "::error::contract_ref '$CONTRACT_REF' contains unsupported characters. Use a tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          # Then Git's own ref-name rules (defence in depth, closer to what
+          # actions/checkout will accept): rejects e.g. '..', a trailing '.lock',
+          # '//', and a trailing '/', which the character subset alone allows.
+          if ! git check-ref-format --allow-onelevel "$CONTRACT_REF" 2>/dev/null; then
+            echo "::error::contract_ref '$CONTRACT_REF' is not a valid Git ref name. Use a tag such as v1 or v1.0.0."
             exit 1
           fi
           echo "ref=$CONTRACT_REF" >> "$GITHUB_OUTPUT"
