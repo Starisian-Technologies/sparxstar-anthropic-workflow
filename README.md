@@ -18,7 +18,7 @@ This gate mints GitHub App tokens to clone two **private** registries, so org-le
 
 - **GitHub App — `composer-resolver` (required).** The mint steps use `actions/create-github-app-token@v3` (`owner: Starisian-Technologies`) to mint installation tokens for `sparxstar-architecture-governance-registry` and `sparxstar-product-specification-registry`. The consuming org must have **composer-resolver** installed and scoped to **both** repos with **Contents: Read** (the gate only reads them — there is no write/push App). Verify in **org Settings → GitHub Apps → composer-resolver → Repository access**. An App existing org-wide is *not* the same as being scoped to these two repos — that mismatch is the most common silent failure.
 - **Secrets** (Settings → Secrets and variables → Actions → **Secrets**): `ANTHROPIC_API_KEY` and `COMPOSER_RESOLVER_PRIVATE_KEY`.
-- **Variable** (same screen → **Variables**, *not* Secrets): `COMPOSER_RESOLVER_CLIENT_ID` — holds the App **client-id string** (the action takes `client-id:`, not a numeric app-id). Must be a Variable; a client-id in a Secret slot, or a missing variable, fails the mint silently.
+- **Variable** (same screen → **Variables**, *not* Secrets): `COMPOSER_RESOLVER_CLIENT_ID` — holds the App **client-id string** (`actions/create-github-app-token@v3` takes `client-id:`; the legacy `app-id` is also accepted, but this workflow passes `client-id`). It must be a **Variable**, not a Secret: the mint reads it via the `vars` context, so a value placed in a Secret slot is invisible to `vars.COMPOSER_RESOLVER_CLIENT_ID` and reads as empty. A missing or misplaced value is **not** a silent failure — the `Validate composer-resolver configuration` step fails fast with an explicit "COMPOSER_RESOLVER_CLIENT_ID variable is not set" error before any token is minted.
 - **Who provisions:** App install + org secret/variable creation need org-admin. A missing prerequisite surfaces as "repository not found" or an empty-credential error at the mint/checkout step — not a clear "you forgot to install the App." Check prerequisites first on any auth failure.
 
 ### 1. What this gate does
@@ -123,7 +123,7 @@ The reviewer only reads the registries — there is no contract-sync or write-ba
 
 ## Troubleshooting
 ### `not our ref` during platform docs checkout
-If a remote workflow run (in a caller repo) fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref`, ensure the reusable workflow is up to date. Current versions resolve the checkout ref from `github.workflow_ref` (instead of using `github.workflow_sha`) so cross-repository calls use a valid ref in this repository.
+If a remote workflow run (in a caller repo) fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref` (e.g. trying to fetch `refs/pull/<n>/merge`), ensure the reusable workflow is up to date. Current versions resolve the reference-docs checkout ref from `github.job_workflow_ref` — the ref of *this* reusable workflow for the job — so cross-repository calls pin to a valid ref of this repository. Earlier versions read `github.workflow_ref`, which in a reusable call is the *caller's* top-level ref (its PR ref on a `pull_request` run); applying that to this repo fails because the caller's PR exists only in the caller.
 
 ### PR diff is empty
 Confirm the caller uses a `pull_request` event and grants required token permissions.
