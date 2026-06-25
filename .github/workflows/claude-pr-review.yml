@@ -170,6 +170,7 @@ jobs:
 
       - name: Mint coding standards read token
         id: standards-token
+        continue-on-error: true
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
@@ -207,6 +208,7 @@ jobs:
           path: .spx-spec-registry
 
       - name: Checkout coding standards
+        if: steps.standards-token.outcome == 'success'
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/starisian-technologies-coding-standards
@@ -511,7 +513,7 @@ jobs:
           VERDICT: PASS / FAIL / CONDITIONAL
 
           VIOLATIONS (must fix before merge):
-          [CRITICAL|HIGH] Description. Rule: [ADR-NNN | INV-NNN | standards-doc RULE-ID | spec §section | platform rule].
+          [CRITICAL|HIGH] Description. Rule: [ADR-NNN | INV-NNN | filename.md RULE-ID | spec §section | platform rule].
 
           WARNINGS (should fix):
           [MEDIUM|LOW] Description.

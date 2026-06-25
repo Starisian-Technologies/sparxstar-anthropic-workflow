@@ -155,7 +155,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('data.decode("utf-8")', spec_block)
 
     def test_violations_format_includes_all_citation_types(self) -> None:
-        self.assertIn("ADR-NNN | INV-NNN | standards-doc RULE-ID | spec §section | platform rule", self.workflow)
+        self.assertIn("ADR-NNN | INV-NNN | filename.md RULE-ID | spec §section | platform rule", self.workflow)
 
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
