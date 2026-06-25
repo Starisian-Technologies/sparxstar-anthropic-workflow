@@ -40,18 +40,50 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('echo "truncated=true" >> "$GITHUB_OUTPUT"', diff_block)
         self.assertIn('data.decode("utf-8")', diff_block)
 
-    def test_spec_context_truncation_is_capped_and_warned(self) -> None:
-        start_marker = 'if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then'
-        end_marker = "Spec context truncated to 50KB"
-        start = self.workflow.index(start_marker)
-        end = self.workflow.index(end_marker, start) + len(end_marker)
-        spec_block = self.workflow[start:end]
-        self.assertIn('data.decode("utf-8")', spec_block)
+    def test_three_tier_context_steps_present(self) -> None:
+        self.assertIn("Load three-tier context", self.workflow)
+        self.assertIn("tier_specs.txt", self.workflow)
+        self.assertIn("tier_contracts.txt", self.workflow)
+        self.assertIn("tier_adrs.txt", self.workflow)
+
+    def test_tier_paths_match_artifact_layout(self) -> None:
+        self.assertIn(".sparxstar/specs/agent", self.workflow)
+        self.assertIn(".sparxstar/contracts", self.workflow)
+        self.assertIn(".sparxstar/adrs", self.workflow)
+
+    def test_tier_truncation_is_capped_per_tier(self) -> None:
+        self.assertIn("truncate_to_bytes", self.workflow)
+        self.assertIn("25000", self.workflow)  # spec tier cap
+        self.assertIn("20000", self.workflow)  # contracts and adrs tier cap
+        self.assertIn('data.decode("utf-8")', self.workflow)
+
+    def test_declaration_step_reads_sparxstar_specs_yml(self) -> None:
+        self.assertIn("Read repo declaration", self.workflow)
+        self.assertIn("sparxstar-specs.yml", self.workflow)
+        self.assertIn("specs_ids", self.workflow)
+        self.assertIn("contracts_ids", self.workflow)
+        self.assertIn("adrs_ids", self.workflow)
+
+    def test_prompt_has_three_named_passes(self) -> None:
+        self.assertIn("PASS 1 — SPEC CONFORMANCE", self.workflow)
+        self.assertIn("PASS 2 — CONTRACT SEAM CHECK", self.workflow)
+        self.assertIn("PASS 3 — ADR DRIFT DETECTION", self.workflow)
 
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\\}\")", self.workflow)
+        self.assertIn('"${TIER_SPECS}": Path("tier_specs.txt").read_text(encoding="utf-8")', self.workflow)
+        self.assertIn('"${TIER_CONTRACTS}": Path("tier_contracts.txt").read_text(encoding="utf-8")', self.workflow)
+        self.assertIn('"${TIER_ADRS}": Path("tier_adrs.txt").read_text(encoding="utf-8")', self.workflow)
+        self.assertIn(
+            r'pattern = re.compile(',
+            self.workflow,
+        )
+        self.assertIn("TIER_SPECS|TIER_CONTRACTS|TIER_ADRS", self.workflow)
+
+    def test_artifact_download_step_present_with_continue_on_error(self) -> None:
+        self.assertIn("Download spec artifact", self.workflow)
+        self.assertIn("actions/download-artifact@v4", self.workflow)
+        self.assertIn("continue-on-error: true", self.workflow)
 
     def test_review_comment_is_upserted_with_single_marker(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
@@ -68,6 +100,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("contents: read", self.consumer_example)
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
+
+    def test_consumer_example_has_fetch_specs_job(self) -> None:
+        self.assertIn("fetch-specs:", self.consumer_example)
+        self.assertIn("fetch-specs.yml", self.consumer_example)
+        self.assertIn("needs: fetch-specs", self.consumer_example)
 
     def test_ci_cd_doc_matches_permission_contract(self) -> None:
         self.assertIn("contents: read", self.docs_ci_cd)
