@@ -24,26 +24,45 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@main
+    # Pin to @v1 (moving major) or @v1.0.0 (locked). Do not reference @main.
+    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1
+    with:
+      contract_ref: v1
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
 ```
 
 Required:
 - Secret: `ANTHROPIC_API_KEY`
+- Secret: `COMPOSER_RESOLVER_PRIVATE_KEY` (composer-resolver GitHub App private key; mints read tokens for the private ADR and product-spec registries)
+- Variable: `COMPOSER_RESOLVER_CLIENT_ID` (composer-resolver GitHub App client id; org-level variable read via the `vars` context)
 - Permissions: `contents: read` and `pull-requests: write`
 
+Inputs:
+- `contract_ref` (optional, default `v1`): tag of the ADR and product-spec registries to review against. Pin to a real tag — `v1` follows the major, `v1.0.0` locks. The registries validate that the ref exists and is at or above the supported floor; the reviewer only requests it and never hardcodes or computes a version.
+
 ## Workflow behavior
-1. Loads PR diff from the caller repository.
-2. Loads repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) and platform reference docs from `reference/*.md` in this workflow repository.
-3. Builds deterministic prompt from diff + context.
-4. Calls Anthropic Messages API.
-5. Upserts a single review comment on the PR.
+The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Determinism and safeguards](#determinism-and-safeguards)):
+
+**Job `build-context` (privileged, never checks out PR-head code):**
+1. Mints short-lived, least-privilege read tokens (one per registry) from the composer-resolver GitHub App.
+2. Checks out the private ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries at `contract_ref`, plus this repo's `reference/*.md`.
+3. Assembles the authoritative ADRs, product specs, and platform reference docs into a trusted-context artifact.
+
+**Job `review` (unprivileged, holds only `ANTHROPIC_API_KEY`):**
+4. Loads the PR diff and repo-local context (`AGENTS.md`, `.github/copilot-instructions.md`, selected markdown docs) — reading PR-head files as data only, never executing them.
+5. Downloads the trusted-context artifact and builds a deterministic prompt from diff + context.
+6. Calls the Anthropic Messages API and upserts a single review comment on the PR.
+
+The reviewer only reads the registries — there is no contract-sync or write-back.
 
 ## Determinism and safeguards
-- Callers must use a `pull_request` trigger; `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
-- Diff truncation at 80KB and context truncation at 50KB with explicit notices
-- Fail-fast handling for missing PR data, empty diff, and missing API key
+- Callers must use a `pull_request` trigger — **never `pull_request_target`**. The review job checks out PR-head code, and `pull_request_target` would run it with a read-write token in the base-repo context. `workflow_call` alone does not restrict invocation to PR events, and the workflow will fail if PR context is missing
+- **Privilege split (CodeQL hardening):** the composer-resolver GitHub App key — the only credential that can reach private registries — lives solely in the `build-context` job, which never checks out PR-head code. The `review` job checks out PR-head code but holds no App key and only *reads* those files as data (no build/install/script execution); trusted context crosses between jobs via artifact only
+- **Private callers only:** the trusted context (private ADR/spec content) is staged as a workflow artifact, which would be downloadable by anyone on a public repository. `build-context` fails fast (before minting any token) unless the caller repository is private
+- Diff truncation at 80KB and context truncation at 50KB with explicit notices; authoritative ADR/spec/reference context is placed first so it survives the cap, and trailing repo-local context is truncated first
+- Fail-fast handling for missing PR data, empty diff, missing API key, and unset composer-resolver configuration
 - Scoped GitHub token permissions and no credential persistence on checkout
 
 ## Governance and standards files
@@ -57,10 +76,12 @@ Required:
 - `.github/ISSUE_TEMPLATE/*.yml`
 
 ## Operations documentation
+- `docs/consumer-setup.md` — how a consuming repository wires up this gate
 - `docs/architecture.md`
 - `docs/ci-cd.md`
 - `docs/deployment.md`
 - `docs/upgrade-rollback.md`
+- `docs/security-notes.md` — threat model, controls, and accepted scan findings
 
 ## Troubleshooting
 ### `not our ref` during platform docs checkout

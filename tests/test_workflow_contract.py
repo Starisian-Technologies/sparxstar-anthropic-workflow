@@ -16,6 +16,119 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("ANTHROPIC_API_KEY:", self.workflow)
         self.assertIn("required: true", self.workflow)
 
+    def test_reusable_workflow_declares_contract_ref_input(self) -> None:
+        self.assertIn("inputs:", self.workflow)
+        self.assertIn("contract_ref:", self.workflow)
+        self.assertIn("default: v1", self.workflow)
+
+    def test_reusable_workflow_requires_composer_resolver_private_key(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY:", self.workflow)
+
+    def test_workflow_validates_resolver_config_before_minting(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID variable is not set", self.workflow)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY secret is not set", self.workflow)
+        validate = self.workflow.index("Validate composer-resolver configuration")
+        mint = self.workflow.index("Mint ADR read token")
+        self.assertLess(validate, mint)
+
+    def test_workflow_mints_scoped_registry_read_tokens(self) -> None:
+        self.assertIn("actions/create-github-app-token@v3", self.workflow)
+        self.assertIn("client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}", self.workflow)
+        self.assertIn("private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.workflow)
+        self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
+        self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
+
+    def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
+        self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
+        self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
+        self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
+        # Registry checkouts use the validated contract ref, not the raw input.
+        self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
+
+    def test_contract_ref_is_validated_before_checkout(self) -> None:
+        self.assertIn("Validate contract_ref", self.workflow)
+        self.assertIn("CONTRACT_REF: ${{ inputs.contract_ref }}", self.workflow)
+        self.assertIn("[A-Za-z0-9][A-Za-z0-9._/-]*", self.workflow)
+        # Plus Git's own ref-name rules (rejects .lock, //, trailing /, ..).
+        self.assertIn("git check-ref-format --allow-onelevel", self.workflow)
+        # The raw input must not flow directly into a checkout ref.
+        self.assertNotIn("ref: ${{ inputs.contract_ref }}", self.workflow)
+        validate = self.workflow.index("Validate contract_ref")
+        adr_checkout = self.workflow.index("Checkout ADR registry")
+        self.assertLess(validate, adr_checkout)
+
+    def test_registry_content_is_loaded_into_spec_context(self) -> None:
+        self.assertIn("ADR REGISTRY FILE", self.workflow)
+        self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
+
+    def _job_blocks(self) -> tuple[str, str]:
+        # build-context is defined before review; slice the file at the two
+        # 2-space-indented job headers.
+        a_start = self.workflow.index("\n  build-context:")
+        b_start = self.workflow.index("\n  review:")
+        self.assertLess(a_start, b_start)
+        return self.workflow[a_start:b_start], self.workflow[b_start:]
+
+    def test_workflow_is_split_into_two_jobs(self) -> None:
+        self.assertIn("\n  build-context:", self.workflow)
+        self.assertIn("\n  review:", self.workflow)
+        _, review = self._job_blocks()
+        self.assertIn("needs: build-context", review)
+
+    def test_privileged_job_holds_app_key_and_never_checks_out_pr_head(self) -> None:
+        build_context, _ = self._job_blocks()
+        # The App key and token minting live in the privileged job...
+        self.assertIn("actions/create-github-app-token@v3", build_context)
+        self.assertIn("secrets.COMPOSER_RESOLVER_PRIVATE_KEY", build_context)
+        self.assertIn("actions/upload-artifact", build_context)
+        # ...which must never resolve or check out untrusted PR-head code.
+        self.assertNotIn("Resolve checkout target", build_context)
+        self.assertNotIn("steps.checkout_target.outputs.ref", build_context)
+
+    def test_build_context_refuses_public_caller(self) -> None:
+        build_context, _ = self._job_blocks()
+        self.assertIn("Guard against public caller repository", build_context)
+        self.assertIn("github.event.repository.private", build_context)
+        # The guard must run before any token is minted AND before any private
+        # content is fetched — it is the first gate, failing the job outright.
+        guard = build_context.index("Guard against public caller repository")
+        mint = build_context.index("Mint ADR read token")
+        fetch = build_context.index("Checkout ADR registry")
+        self.assertLess(guard, mint)
+        self.assertLess(guard, fetch)
+        # The guard is the first step in the job — no other `- name:` precedes it.
+        self.assertEqual(
+            build_context.index("      - name:"),
+            build_context.index("      - name: Guard against public caller repository"),
+        )
+
+    def test_all_checkouts_disable_credential_persistence(self) -> None:
+        checkouts = self.workflow.count("uses: actions/checkout@v5")
+        persist_false = self.workflow.count("persist-credentials: false")
+        self.assertGreaterEqual(checkouts, 4)
+        self.assertEqual(checkouts, persist_false)
+
+    def test_trusted_context_loaded_before_repo_local(self) -> None:
+        _, review = self._job_blocks()
+        trusted = review.index("cat .spx-trusted-context/trusted_context.txt")
+        repo_local = review.index("REPO-LOCAL FILE: AGENTS.md")
+        # Trusted, canonical context must precede repo-local context so it
+        # survives the 50KB cap.
+        self.assertLess(trusted, repo_local)
+
+    def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # The job that checks out untrusted PR-head code...
+        self.assertIn("ref: ${{ steps.checkout_target.outputs.ref }}", review)
+        # ...must not hold the App key or mint tokens...
+        self.assertNotIn("actions/create-github-app-token", review)
+        self.assertNotIn("COMPOSER_RESOLVER_PRIVATE_KEY", review)
+        # ...and receives trusted context only via artifact (never re-fetched).
+        self.assertIn("actions/download-artifact", review)
+        self.assertNotIn("Checkout ADR registry", review)
+        self.assertNotIn("Checkout product-spec registry", review)
+
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
         self.assertIn("contents: read", self.workflow)
@@ -69,10 +182,28 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
 
+    def test_consumer_example_pins_v1_and_passes_resolver_secret(self) -> None:
+        self.assertIn("claude-pr-review.yml@v1", self.consumer_example)
+        self.assertNotIn("claude-pr-review.yml@main", self.consumer_example)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.consumer_example)
+        self.assertIn("contract_ref:", self.consumer_example)
+
+    def test_readme_pins_v1_and_documents_resolver_requirements(self) -> None:
+        self.assertIn("claude-pr-review.yml@v1", self.readme)
+        self.assertNotIn("claude-pr-review.yml@main", self.readme)
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.readme)
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.readme)
+        self.assertIn("contract_ref", self.readme)
+
     def test_ci_cd_doc_matches_permission_contract(self) -> None:
         self.assertIn("contents: read", self.docs_ci_cd)
         self.assertIn("pull-requests: write", self.docs_ci_cd)
         self.assertIn("ANTHROPIC_API_KEY", self.docs_ci_cd)
+
+    def test_ci_cd_doc_documents_resolver_and_contract_ref(self) -> None:
+        self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.docs_ci_cd)
+        self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.docs_ci_cd)
+        self.assertIn("contract_ref", self.docs_ci_cd)
 
 
 if __name__ == "__main__":
