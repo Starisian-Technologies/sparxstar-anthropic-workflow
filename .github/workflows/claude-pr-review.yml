@@ -12,13 +12,243 @@ on:
         required: false
         default: 'sparxstar-specs'
         type: string
+      contract_ref:
+        description: >-
+          Git ref (tag) of the ADR and product-spec registries to review
+          against. Pin to the immutable release tag, e.g. v1.0.0 (the platform
+          default); v1 is the moving major alias and is not the recommended
+          pin. Never use main. Validated here only for safe ref shape; the
+          registry checkout fails if the tag does not exist. This reviewer does
+          not enforce a version floor — that is the job of the fetch/version
+          gates, not this judgment layer.
+        required: false
+        type: string
+        default: v1.0.0
     secrets:
       ANTHROPIC_API_KEY:
         required: true
+      COMPOSER_RESOLVER_PRIVATE_KEY:
+        description: >-
+          Private key for the composer-resolver GitHub App, used to mint
+          short-lived read tokens for the private ADR and product-spec
+          registries. Pass by name (not inherit). The app's client id is read
+          from the organization variable COMPOSER_RESOLVER_CLIENT_ID.
+        required: true
 
 jobs:
+  # Security model (CodeQL "checkout of untrusted code in a trusted context"):
+  # the composer-resolver GitHub App key is the most powerful credential here —
+  # it can mint cross-repo read tokens for private registries. It must never
+  # share a job with untrusted PR-head code. So the work is split:
+  #
+  #   build-context (privileged) — holds the App key, mints tokens, fetches the
+  #     ADR + product-spec registries at the pinned contract_ref, and uploads
+  #     the assembled trusted context as an artifact. It NEVER checks out the
+  #     PR head, so attacker-controllable code never runs beside the App key.
+  #
+  #   review (unprivileged) — checks out the PR head, but only ever READS those
+  #     files as data (git checkout, gh pr diff, cat into a prompt — no build,
+  #     install, or script execution). It consumes the trusted context purely
+  #     by artifact, holds only ANTHROPIC_API_KEY (which cannot touch repos),
+  #     and posts the comment. The App key is absent from this job entirely.
+  #
+  # Consumers MUST invoke this reusable workflow from a `pull_request` trigger,
+  # never `pull_request_target`: the latter would run the review job with a
+  # read-write token in the base-repo context while checking out PR-head code.
+  build-context:
+    name: Build trusted review context
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      # This reviewer reads private ADR/product-spec registries and stages the
+      # assembled contents as a workflow artifact for the review job. On a
+      # public repository, Actions artifacts are downloadable by anyone, which
+      # would leak private registry content. Refuse to run (before any token is
+      # minted or private content fetched) unless the caller repository is
+      # private. Fails closed: an absent/empty privacy flag is treated as not
+      # private.
+      - name: Guard against public caller repository
+        env:
+          REPO_IS_PRIVATE: ${{ github.event.repository.private }}
+          REPO_FULL_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${REPO_IS_PRIVATE:-}" != "true" ]; then
+            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads private ADR and product-spec registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
+            exit 1
+          fi
+
+      - name: Resolve workflow repository ref
+        id: workflow_repo_ref
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          WORKFLOW_REF="${WORKFLOW_REF:-}"
+          RESOLVED_REF="${WORKFLOW_REF#*@}"
+
+          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
+            RESOLVED_REF="main"
+          fi
+
+          case "$RESOLVED_REF" in
+            refs/heads/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
+              ;;
+            refs/tags/*)
+              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
+              ;;
+          esac
+
+          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
+
+      # The ADR and product-spec registries are private; the caller's
+      # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
+      # read tokens from the composer-resolver GitHub App — one scoped to
+      # each registry — so the reviewer reads contracts without any
+      # cross-repo write or sync capability. This runs in the privileged
+      # job that never sees PR-head code.
+      - name: Validate composer-resolver configuration
+        env:
+          COMPOSER_RESOLVER_CLIENT_ID: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${COMPOSER_RESOLVER_CLIENT_ID:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_CLIENT_ID variable is not set. Define it as an organization or repository variable (the composer-resolver GitHub App client id) so the workflow can mint read tokens for the private ADR and product-spec registries."
+            exit 1
+          fi
+          if [ -z "${COMPOSER_RESOLVER_PRIVATE_KEY:-}" ]; then
+            echo "::error::COMPOSER_RESOLVER_PRIVATE_KEY secret is not set. Add the composer-resolver GitHub App private key to repository or organization secrets and pass it by name to this reusable workflow."
+            exit 1
+          fi
+
+      # Constrain the caller-supplied contract_ref to a safe git ref shape
+      # before it reaches any checkout. This is an input-format guard only; the
+      # registry checkout below fails if the tag does not exist. Version-floor
+      # enforcement is NOT done here — it lives in the fetch/version-drift gates,
+      # not in this judgment layer. This is the only place contract_ref is
+      # consumed, so registry checkouts reference the validated output.
+      - name: Validate contract_ref
+        id: contract
+        env:
+          CONTRACT_REF: ${{ inputs.contract_ref }}
+        run: |
+          set -euo pipefail
+          CONTRACT_REF="${CONTRACT_REF:-}"
+          if [ -z "$CONTRACT_REF" ]; then
+            echo "::error::contract_ref is empty. Pass a real registry tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          # Safe character subset first: rules out shell metacharacters, a
+          # leading dash (option injection), and whitespace before the value is
+          # ever passed to another command.
+          if ! printf '%s' "$CONTRACT_REF" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._/-]*$'; then
+            echo "::error::contract_ref '$CONTRACT_REF' contains unsupported characters. Use a tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          # Then Git's own ref-name rules (defence in depth, closer to what
+          # actions/checkout will accept): rejects e.g. '..', a trailing '.lock',
+          # '//', and a trailing '/', which the character subset alone allows.
+          if ! git check-ref-format --allow-onelevel "$CONTRACT_REF" 2>/dev/null; then
+            echo "::error::contract_ref '$CONTRACT_REF' is not a valid Git ref name. Use a tag such as v1 or v1.0.0."
+            exit 1
+          fi
+          echo "ref=$CONTRACT_REF" >> "$GITHUB_OUTPUT"
+
+      - name: Mint ADR read token
+        id: adr-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-architecture-governance-registry
+
+      - name: Mint spec read token
+        id: spec-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-product-specification-registry
+
+      - name: Checkout platform reference docs
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-claude-pr-review
+          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-workflow-repo
+
+      - name: Checkout ADR registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-architecture-governance-registry
+          ref: ${{ steps.contract.outputs.ref }}
+          token: ${{ steps.adr-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-adr-registry
+
+      - name: Checkout product-spec registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-product-specification-registry
+          ref: ${{ steps.contract.outputs.ref }}
+          token: ${{ steps.spec-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-spec-registry
+
+      - name: Assemble trusted context
+        run: |
+          set -euo pipefail
+          : > trusted_context.txt
+
+          # Authoritative contracts from the private registries, pinned to the
+          # requested contract_ref, plus the platform reference snapshot. The
+          # consuming job appends repo-local context and applies the size cap.
+          if [ -d ".spx-adr-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          if [ -d ".spx-spec-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          for f in .spx-workflow-repo/reference/*.md; do
+            if [ -f "$f" ]; then
+              printf '%s\n' "--- PLATFORM REFERENCE FILE: $f ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            fi
+          done
+
+      - name: Upload trusted context
+        uses: actions/upload-artifact@v4
+        with:
+          name: spx-trusted-context
+          path: trusted_context.txt
+          retention-days: 1
+          if-no-files-found: error
+
   review:
     name: Claude Code Review
+    needs: build-context
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -47,6 +277,9 @@ jobs:
             echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
           fi
 
+      # Untrusted PR-head code. This job only ever READS these files (the diff
+      # and markdown context); it never builds, installs, or executes anything
+      # from the checked-out tree, and it holds no cross-repo credential.
       - name: Checkout code
         uses: actions/checkout@v5
         with:
@@ -54,30 +287,6 @@ jobs:
           persist-credentials: false
           repository: ${{ steps.checkout_target.outputs.repository }}
           ref: ${{ steps.checkout_target.outputs.ref }}
-
-      - name: Resolve workflow repository ref
-        id: workflow_repo_ref
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          set -euo pipefail
-          WORKFLOW_REF="${WORKFLOW_REF:-}"
-          RESOLVED_REF="${WORKFLOW_REF#*@}"
-
-          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
-            RESOLVED_REF="main"
-          fi
-
-          case "$RESOLVED_REF" in
-            refs/heads/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
-              ;;
-            refs/tags/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
-              ;;
-          esac
-
-          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
 
       - name: Get PR diff
         id: diff
@@ -133,13 +342,11 @@ PY
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Checkout platform reference docs
-        uses: actions/checkout@v5
+      - name: Download trusted context
+        uses: actions/download-artifact@v4
         with:
-          repository: Starisian-Technologies/sparxstar-claude-pr-review
-          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
-          fetch-depth: 1
-          path: .spx-workflow-repo
+          name: spx-trusted-context
+          path: .spx-trusted-context
 
       - name: Download spec artifact
         id: artifact
@@ -154,6 +361,56 @@ PY
         run: |
           set -euo pipefail
           pip install pyyaml -q
+
+          : > spec_context.txt
+
+          # Authoritative ADRs, product specs, and platform reference docs were
+          # assembled in the privileged build-context job and arrive purely as
+          # an artifact (never re-fetched here, where untrusted code lives).
+          # Written FIRST so the canonical contracts survive the size cap; the
+          # repo-local (untrusted PR) context below is appended and is what gets
+          # truncated if anything does.
+          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
+            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
+          if [ -f "AGENTS.md" ]; then
+            printf '%s\n' "--- REPO-LOCAL FILE: AGENTS.md ---" >> spec_context.txt
+            cat AGENTS.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
+          if [ -f ".github/copilot-instructions.md" ]; then
+            printf '%s\n' "--- REPO-LOCAL FILE: .github/copilot-instructions.md ---" >> spec_context.txt
+            cat .github/copilot-instructions.md >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          fi
+
+          for f in *.md docs/*.md specs/*.md; do
+            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
+              printf '%s\n' "--- REPO-LOCAL FILE: $f ---" >> spec_context.txt
+              cat "$f" >> spec_context.txt
+              printf '\n\n' >> spec_context.txt
+            fi
+          done
+
+          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
+            python3 - <<'PY'
+from pathlib import Path
+path = Path("spec_context.txt")
+data = path.read_bytes()[:50000]
+while data:
+    try:
+        data.decode("utf-8")
+        break
+    except UnicodeDecodeError:
+        data = data[:-1]
+path.write_bytes(data)
+PY
+            echo "::warning::Spec context truncated to 50KB. Authoritative ADR/spec/reference context is placed first and preserved; trailing repo-local context may be truncated."
+          fi
+
           python3 - <<'PY'
           import os
           import sys
@@ -288,7 +545,7 @@ PY
         run: |
           set -euo pipefail
           if [ -z "${ANTHROPIC_API_KEY}" ]; then
-            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it to the repository or organisation secrets."
+            echo "::error::ANTHROPIC_API_KEY secret is not set. Add it to the repository or organization secrets."
             exit 1
           fi
 
@@ -440,7 +697,7 @@ PROMPT_EOF
 PY
 
           jq -n \
-            --arg model "claude-sonnet-4-20250514" \
+            --arg model "claude-sonnet-4-6" \
             --argjson max_tokens 4096 \
             --rawfile content prompt.txt \
             '{model: $model, max_tokens: $max_tokens, messages: [{role: "user", content: $content}]}' \
