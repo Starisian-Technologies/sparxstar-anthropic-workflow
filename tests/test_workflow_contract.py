@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -11,6 +12,16 @@ class WorkflowContractTests(unittest.TestCase):
         cls.docs_ci_cd = (repo_root / "docs/ci-cd.md").read_text(encoding="utf-8")
         cls.consumer_example = (repo_root / "examples/consumer-workflow.yml").read_text(encoding="utf-8")
 
+    def _assert_claude_workflow_pinned_to(self, text: str, expected_ref: str) -> None:
+        # Extract every `uses: …/claude-pr-review.yml@<ref>` pin and assert each
+        # resolves to exactly expected_ref. \S+ stops at whitespace, so trailing
+        # spaces, CRLF line endings, and inline comments (…@v1 # note) are all
+        # handled, and the @v1.0.0-contains-@v1 substring trap is avoided.
+        refs = re.findall(r"claude-pr-review\.yml@(\S+)", text)
+        self.assertTrue(refs, "no claude-pr-review.yml@<ref> pin found")
+        for ref in refs:
+            self.assertEqual(ref, expected_ref)
+
     def test_reusable_workflow_requires_anthropic_api_key(self) -> None:
         self.assertIn("workflow_call:", self.workflow)
         self.assertIn("ANTHROPIC_API_KEY:", self.workflow)
@@ -19,7 +30,8 @@ class WorkflowContractTests(unittest.TestCase):
     def test_reusable_workflow_declares_contract_ref_input(self) -> None:
         self.assertIn("inputs:", self.workflow)
         self.assertIn("contract_ref:", self.workflow)
-        self.assertIn("default: v1", self.workflow)
+        # Default is the immutable release tag, not the moving major alias.
+        self.assertIn("default: v1.0.0", self.workflow)
 
     def test_reusable_workflow_requires_composer_resolver_private_key(self) -> None:
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY:", self.workflow)
@@ -182,15 +194,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
 
-    def test_consumer_example_pins_v1_and_passes_resolver_secret(self) -> None:
-        self.assertIn("claude-pr-review.yml@v1", self.consumer_example)
-        self.assertNotIn("claude-pr-review.yml@main", self.consumer_example)
+    def test_consumer_example_pins_immutable_tag_and_passes_resolver_secret(self) -> None:
+        # Platform convention: pin the immutable release tag, not @v1 or @main.
+        self._assert_claude_workflow_pinned_to(self.consumer_example, "v1.0.0")
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.consumer_example)
-        self.assertIn("contract_ref:", self.consumer_example)
+        self.assertIn("contract_ref: v1.0.0", self.consumer_example)
 
-    def test_readme_pins_v1_and_documents_resolver_requirements(self) -> None:
-        self.assertIn("claude-pr-review.yml@v1", self.readme)
-        self.assertNotIn("claude-pr-review.yml@main", self.readme)
+    def test_readme_pins_immutable_tag_and_documents_resolver_requirements(self) -> None:
+        self._assert_claude_workflow_pinned_to(self.readme, "v1.0.0")
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.readme)
         self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.readme)
         self.assertIn("contract_ref", self.readme)

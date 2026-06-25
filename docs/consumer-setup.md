@@ -34,10 +34,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # Pin @v1 (moving major) or @v1.0.0 (locked). Both resolve. Never @main.
-    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1
+    # Pin the immutable release tag @v1.0.0 (platform default). @v1 is the
+    # moving major alias and is not the recommended pin; never use @main.
+    uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
     with:
-      contract_ref: v1
+      contract_ref: v1.0.0
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
@@ -48,11 +49,13 @@ That block is the complete wiring. The sections below explain each part.
 ## What the caller passes
 
 ### Inputs (`with:`)
-- `contract_ref` — *optional*, default `v1`. The tag of the ADR and product-spec
-  registries to review against. Pin to a real tag: `v1` follows the major,
-  `v1.0.0` locks. The registries validate that the ref exists and meets the
-  version floor; the caller never hardcodes or computes a version, it only
-  requests one. Omit `with:` entirely to accept the `v1` default.
+- `contract_ref` — *optional*, default `v1.0.0`. The tag of the ADR and
+  product-spec registries to review against. Pin to the immutable release tag
+  (`v1.0.0`, the platform default); `v1` is the moving major alias and is not
+  the recommended pin, and never use `main`. The registries validate that the
+  ref exists and meets the version floor; the caller never hardcodes or computes
+  a version, it only requests one. Omit `with:` entirely to accept the `v1.0.0`
+  default.
 
 ### Secrets (`secrets:`) — passed by name
 - `ANTHROPIC_API_KEY`

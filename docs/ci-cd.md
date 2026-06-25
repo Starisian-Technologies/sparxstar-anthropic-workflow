@@ -16,7 +16,7 @@ Consumer repositories must grant:
 - `COMPOSER_RESOLVER_CLIENT_ID` — composer-resolver GitHub App client id; org-level variable read by the reusable workflow via the `vars` context.
 
 ## Inputs
-- `contract_ref` (optional, default `v1`) — tag of the ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries to review against. Pass a real tag (`v1` follows the major; `v1.0.0` locks). The registries enforce existence and floor; the reviewer never hardcodes or computes a version. The reviewer only reads — no contract-sync.
+- `contract_ref` (optional, default `v1.0.0`) — tag of the ADR (`sparxstar-architecture-governance-registry`) and product-spec (`sparxstar-product-specification-registry`) registries to review against. Pin the immutable release tag (`v1.0.0`, the platform default); `v1` is the moving major alias and is not the recommended pin, and never use `main`. The registries enforce existence and floor; the reviewer never hardcodes or computes a version. The reviewer only reads — no contract-sync.
 
 ## Job structure (privilege split)
 The reusable workflow runs as two jobs so the composer-resolver App key never shares a job with untrusted PR-head code (CodeQL "checkout of untrusted code in a trusted context"):
