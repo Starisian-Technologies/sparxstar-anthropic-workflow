@@ -95,11 +95,10 @@ class WorkflowContractTests(unittest.TestCase):
         fetch = build_context.index("Checkout ADR registry")
         self.assertLess(guard, mint)
         self.assertLess(guard, fetch)
-        # Nothing precedes the guard except the job's `steps:` declaration.
-        self.assertTrue(
-            build_context[: build_context.index("Guard against public caller repository")]
-            .rstrip()
-            .endswith("steps:")
+        # The guard is the first step in the job — no other `- name:` precedes it.
+        self.assertEqual(
+            build_context.index("      - name:"),
+            build_context.index("      - name: Guard against public caller repository"),
         )
 
     def test_all_checkouts_disable_credential_persistence(self) -> None:
