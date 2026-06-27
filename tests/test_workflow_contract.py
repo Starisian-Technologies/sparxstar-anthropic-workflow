@@ -62,7 +62,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
 
     def test_platform_contracts_registry_is_minted_fetched_and_injected(self) -> None:
-        build_context, _ = self._job_blocks()
+        build_context, review = self._job_blocks()
         # Minted from the same composer-resolver App, scoped to the contracts
         # registry only — never a long-lived PAT.
         self.assertIn("Mint platform-contracts read token", build_context)
@@ -74,6 +74,9 @@ class WorkflowContractTests(unittest.TestCase):
         # MANIFEST index), so the unprivileged review job receives it as data.
         self.assertIn("PLATFORM CONTRACT FILE", build_context)
         self.assertIn(".spx-contracts-registry", build_context)
+        # Privilege separation: the unprivileged review job must NOT check out
+        # the contracts registry directly — it only consumes it via artifact.
+        self.assertNotIn("Checkout platform-contracts registry", review)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
@@ -173,6 +176,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("actions/download-artifact", review)
         self.assertNotIn("Checkout ADR registry", review)
         self.assertNotIn("Checkout product-spec registry", review)
+        self.assertNotIn("Checkout platform-contracts registry", review)
 
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
