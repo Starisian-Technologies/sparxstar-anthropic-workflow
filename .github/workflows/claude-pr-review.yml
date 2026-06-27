@@ -21,9 +21,10 @@ on:
       COMPOSER_RESOLVER_PRIVATE_KEY:
         description: >-
           Private key for the composer-resolver GitHub App, used to mint
-          short-lived read tokens for the private ADR and product-spec
-          registries. Pass by name (not inherit). The app's client id is read
-          from the organization variable COMPOSER_RESOLVER_CLIENT_ID.
+          short-lived read tokens for the private ADR, product-spec, and
+          platform-contracts registries. Pass by name (not inherit). The app's
+          client id is read from the organization variable
+          COMPOSER_RESOLVER_CLIENT_ID.
         required: true
 
 jobs:
@@ -33,9 +34,10 @@ jobs:
   # share a job with untrusted PR-head code. So the work is split:
   #
   #   build-context (privileged) — holds the App key, mints tokens, fetches the
-  #     ADR + product-spec registries at the pinned contract_ref, and uploads
-  #     the assembled trusted context as an artifact. It NEVER checks out the
-  #     PR head, so attacker-controllable code never runs beside the App key.
+  #     ADR + product-spec + platform-contracts registries at the pinned
+  #     contract_ref, and uploads the assembled trusted context as an artifact.
+  #     It NEVER checks out the PR head, so attacker-controllable code never
+  #     runs beside the App key.
   #
   #   review (unprivileged) — checks out the PR head, but only ever READS those
   #     files as data (git checkout, gh pr diff, cat into a prompt — no build,
@@ -54,8 +56,9 @@ jobs:
       contents: read
 
     steps:
-      # This reviewer reads private ADR/product-spec registries and stages the
-      # assembled contents as a workflow artifact for the review job. On a
+      # This reviewer reads private ADR/product-spec/platform-contracts
+      # registries and stages the assembled contents as a workflow artifact
+      # for the review job. On a
       # public repository, Actions artifacts are downloadable by anyone, which
       # would leak private registry content. Refuse to run (before any token is
       # minted or private content fetched) unless the caller repository is
@@ -68,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${REPO_IS_PRIVATE:-}" != "true" ]; then
-            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads private ADR and product-spec registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
+            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads the private ADR, product-spec, and platform-contracts registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
             exit 1
           fi
 
@@ -178,6 +181,15 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
+      - name: Mint platform-contracts read token
+        id: contracts-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
+          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+          owner: Starisian-Technologies
+          repositories: sparxstar-platform-contracts
+
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
@@ -207,6 +219,16 @@ jobs:
           fetch-depth: 1
           path: .spx-spec-registry
 
+      - name: Checkout platform-contracts registry
+        uses: actions/checkout@v5
+        with:
+          repository: Starisian-Technologies/sparxstar-platform-contracts
+          ref: ${{ steps.contract.outputs.ref }}
+          token: ${{ steps.contracts-token.outputs.token }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: .spx-contracts-registry
+
       - name: Assemble trusted context
         run: |
           set -euo pipefail
@@ -229,6 +251,19 @@ jobs:
               cat "$f" >> trusted_context.txt
               printf '\n\n' >> trusted_context.txt
             done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          # Platform contract registry: the canonical interface contracts
+          # (MANIFEST.json index + the PHP interface declarations under src/,
+          # plus any markdown). These define the boundaries each repo must
+          # honour, so they are authoritative review context alongside the
+          # ADRs and product specs.
+          if [ -d ".spx-contracts-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- PLATFORM CONTRACT FILE: ${f#.spx-contracts-registry/} ---" >> trusted_context.txt
+              cat "$f" >> trusted_context.txt
+              printf '\n\n' >> trusted_context.txt
+            done < <(find .spx-contracts-registry -type f \( -name '*.php' -o -name '*.md' -o -name 'MANIFEST.json' \) -not -path '*/.git/*' -not -path '*/vendor/*' | sort)
           fi
 
           for f in .spx-workflow-repo/reference/*.md; do
@@ -438,8 +473,8 @@ jobs:
           PR #${PR_NUMBER}: ${PR_TITLE}
           ${TRUNCATION_LINE}
 
-          PLATFORM CONTEXT, ADRs, AND PRODUCT SPECS:
-          The following context is assembled from repo-local docs, the authoritative ADR and product-spec registries, and platform reference docs. Treat ADR REGISTRY and PRODUCT SPEC REGISTRY sections as the canonical contracts.
+          PLATFORM CONTEXT, ADRs, PRODUCT SPECS, AND CONTRACTS:
+          The following context is assembled from repo-local docs, the authoritative ADR, product-spec, and platform-contract registries, and platform reference docs. Treat ADR REGISTRY, PRODUCT SPEC REGISTRY, and PLATFORM CONTRACT sections as the canonical contracts; PLATFORM CONTRACT files declare interface boundaries (PHP interfaces and the MANIFEST index) that the diff must honour.
           ${SPECS}
 
           PLATFORM-WIDE RULES (apply to every repo):
