@@ -49,14 +49,31 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.workflow)
         self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("repositories: sparxstar-platform-contracts", self.workflow)
 
     def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
         self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
+        self.assertIn("repository: Starisian-Technologies/sparxstar-platform-contracts", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
         self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
+        self.assertIn("token: ${{ steps.contracts-token.outputs.token }}", self.workflow)
         # Registry checkouts use the validated contract ref, not the raw input.
         self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
+
+    def test_platform_contracts_registry_is_minted_fetched_and_injected(self) -> None:
+        build_context, _ = self._job_blocks()
+        # Minted from the same composer-resolver App, scoped to the contracts
+        # registry only — never a long-lived PAT.
+        self.assertIn("Mint platform-contracts read token", build_context)
+        self.assertIn("repositories: sparxstar-platform-contracts", build_context)
+        # Fetched in the privileged job at the validated contract_ref...
+        self.assertIn("Checkout platform-contracts registry", build_context)
+        self.assertIn("token: ${{ steps.contracts-token.outputs.token }}", build_context)
+        # ...and folded into the trusted-context artifact (PHP interfaces +
+        # MANIFEST index), so the unprivileged review job receives it as data.
+        self.assertIn("PLATFORM CONTRACT FILE", build_context)
+        self.assertIn(".spx-contracts-registry", build_context)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
@@ -73,6 +90,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_registry_content_is_loaded_into_spec_context(self) -> None:
         self.assertIn("ADR REGISTRY FILE", self.workflow)
         self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
+        self.assertIn("PLATFORM CONTRACT FILE", self.workflow)
 
     def _job_blocks(self) -> tuple[str, str]:
         # build-context is defined before review; slice the file at the two
