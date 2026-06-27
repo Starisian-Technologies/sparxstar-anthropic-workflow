@@ -72,10 +72,20 @@ jobs:
             exit 1
           fi
 
+      # Resolve THIS reusable workflow's own ref so the reference-docs checkout
+      # below pulls sparxstar-claude-pr-review at the same version the caller
+      # pinned (e.g. v1.0.0). Use github.job_workflow_ref — the ref of the
+      # reusable workflow file for this job — NOT github.workflow_ref, which in
+      # a reusable-workflow call is the *caller's* top-level workflow ref. For a
+      # cross-repo caller that ref is the caller's PR ref (e.g.
+      # helios/...@refs/pull/51/merge), and applying it to this repo fails with
+      # "not our ref" because that PR exists only in the caller. job_workflow_ref
+      # keeps this checkout pinned to a trusted ref of this repo and never lets
+      # the caller's PR ref influence what the privileged job checks out.
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_REF: ${{ github.job_workflow_ref }}
         run: |
           set -euo pipefail
           WORKFLOW_REF="${WORKFLOW_REF:-}"

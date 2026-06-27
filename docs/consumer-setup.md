@@ -119,19 +119,18 @@ Live tags:
 
 | Tag | Kind | Use it when |
 | --- | --- | --- |
-| `v1.0.0` | Immutable release — never moves | **Platform default.** Frozen, reproducible workflow version. |
-| `v1` | Moving major alias — advances to the latest `v1.x.y` | Available, but **not** the recommended pin. |
+| `v1.0.0` | Immutable release — never moves | **Current platform default.** Frozen, reproducible workflow version. |
 
-**Pin `@v1.0.0`.** The platform-wide pin is the immutable release tag. `@v1`
-still resolves but is not the documented consumer default — bumping the pin is a
-deliberate adoption act, not an automatic pick-up. **Never pin `@main` in
-production.**
+**Pin an immutable release tag** (current platform default: `@v1.0.0`). There is
+**no `@v1` moving alias** published — don't assume `@v1` resolves; pin a specific
+release tag. Bumping the pin to a future release (`v1.1.0`, …) is a deliberate
+adoption act. **Never pin `@main` in production.**
 
 ### Section 3 — Inputs (from `on.workflow_call.inputs`)
 
 | Input | Required | Type | Default | Purpose / valid values |
 | --- | --- | --- | --- | --- |
-| `contract_ref` | No | string | `v1.0.0` | Registry tag (ADR + product-spec) the review is performed against. Pin the immutable release tag (`v1.0.0`); `v1` is the moving alias and is not recommended; never `main`. The gate validates it for **safe ref shape** (a character allowlist + `git check-ref-format`); a malformed ref hard-fails the `Validate contract_ref` step. **Existence** is enforced indirectly — the registry checkout fails if the tag doesn't exist. This gate does **not** perform a registry version-floor check (that policy lives in the tech-spec gate's `fetch-specs.yml`, which this reviewer does not invoke — it checks out the registries directly). |
+| `contract_ref` | No | string | `v1.0.0` | Registry tag (ADR + product-spec) the review is performed against. Pin a real registry tag; never `main`. The gate validates it for **safe ref shape** (a character allowlist + `git check-ref-format`); a malformed ref hard-fails the `Validate contract_ref` step. **Existence** is enforced indirectly — the registry checkout fails if the tag doesn't exist. This gate does **not** perform a registry version-floor check (that policy lives in the tech-spec gate's `fetch-specs.yml`, which this reviewer does not invoke — it checks out the registries directly). |
 
 Outputs: none. The gate's product is the PR review comment, not a workflow
 output.
@@ -206,8 +205,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    # Pin the immutable release tag @v1.0.0 (platform default). @v1 is the
-    # moving major alias and is not recommended; never reference @main.
+    # Pin the immutable release tag @v1.0.0 (the only published tag; there is
+    # no @v1 moving alias). Never reference @main.
     uses: Starisian-Technologies/sparxstar-claude-pr-review/.github/workflows/claude-pr-review.yml@v1.0.0
     with:
       contract_ref: v1.0.0           # ← a real registry tag (immutable release; the checkout fails if it doesn't exist)

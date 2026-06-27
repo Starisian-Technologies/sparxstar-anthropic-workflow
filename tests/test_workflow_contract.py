@@ -98,6 +98,21 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("Resolve checkout target", build_context)
         self.assertNotIn("steps.checkout_target.outputs.ref", build_context)
 
+    def test_reference_docs_checkout_resolves_own_repo_ref_not_caller_ref(self) -> None:
+        build_context, _ = self._job_blocks()
+        # The privileged job checks out THIS repo's reference docs at the ref of
+        # the reusable workflow itself (github.job_workflow_ref). It must NOT use
+        # github.workflow_ref, which in a reusable call is the caller's top-level
+        # ref — for a cross-repo PR caller that is refs/pull/<n>/merge, a ref that
+        # exists only in the caller and fails "not our ref" against this repo.
+        self.assertIn("WORKFLOW_REF: ${{ github.job_workflow_ref }}", build_context)
+        # The caller-scoped context must not be bound to the resolver env (a
+        # comment may name it to explain the distinction; the binding must not).
+        self.assertNotIn("WORKFLOW_REF: ${{ github.workflow_ref }}", build_context)
+        # The resolved ref feeds only this repo's own checkout, keeping the
+        # caller's PR ref from ever steering the privileged job's checkout.
+        self.assertIn("ref: ${{ steps.workflow_repo_ref.outputs.ref }}", build_context)
+
     def test_build_context_refuses_public_caller(self) -> None:
         build_context, _ = self._job_blocks()
         self.assertIn("Guard against public caller repository", build_context)
