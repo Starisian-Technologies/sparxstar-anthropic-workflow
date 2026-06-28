@@ -324,33 +324,53 @@ jobs:
           repository: ${{ steps.checkout_target.outputs.repository }}
           ref: ${{ steps.checkout_target.outputs.ref }}
 
-      - name: Get PR diff
+      - name: Get change diff
         id: diff
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          PR_NUMBER="${PR_NUMBER:-}"
+          EVENT_NAME="${EVENT_NAME:-}"
 
-          if [ -z "${PR_NUMBER}" ]; then
-            echo "::error::No pull request number found in the workflow event payload. This workflow requires a pull_request event; workflow_dispatch cannot fetch a PR diff."
-            exit 1
-          fi
-
-          if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
-            echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
-            if [ -s gh_pr_diff.stderr ]; then
-              echo "::group::gh pr diff stderr"
-              cat gh_pr_diff.stderr
-              echo "::endgroup::"
+          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+            if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
+              echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+              if [ -s gh_pr_diff.stderr ]; then
+                echo "::group::gh pr diff stderr"
+                cat gh_pr_diff.stderr
+                echo "::endgroup::"
+              fi
+              exit 1
             fi
+          elif [ "${EVENT_NAME}" = "push" ]; then
+            BEFORE_SHA="${BEFORE_SHA:-}"
+            CURRENT_SHA="${CURRENT_SHA:-}"
+            if [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
+              if ! git diff --no-color "${BEFORE_SHA}" "${CURRENT_SHA}" > pr.diff; then
+                echo "::error::Failed to compute push diff between ${BEFORE_SHA} and ${CURRENT_SHA}."
+                exit 1
+              fi
+            elif git rev-parse --verify "${CURRENT_SHA}^" >/dev/null 2>&1; then
+              if ! git diff --no-color "${CURRENT_SHA}^" "${CURRENT_SHA}" > pr.diff; then
+                echo "::error::Failed to compute fallback push diff for commit ${CURRENT_SHA}."
+                exit 1
+              fi
+            else
+              echo "::error::Cannot compute push diff because there is no previous commit to compare against."
+              exit 1
+            fi
+          else
+            echo "::error::Unsupported event '${EVENT_NAME}'. Use pull_request or push."
             exit 1
           fi
 
           if [ ! -s pr.diff ]; then
-            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the workflow ran for a pull_request event, that the pull request number is valid, and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            echo "::error::Change diff is empty. Check that the event contains actual code changes and that pull_request or push context is valid."
             if [ -s gh_pr_diff.stderr ]; then
               echo "::group::gh pr diff stderr"
               cat gh_pr_diff.stderr
@@ -393,6 +413,19 @@ jobs:
         run: |
           set -euo pipefail
           : > spec_context.txt
+          declare -A seen
+
+          add_context_file() {
+            local file="$1"
+            local label="$2"
+            if [ ! -f "$file" ] || [[ -v "seen[$file]" ]]; then
+              return
+            fi
+            seen["$file"]=1
+            printf '%s\n' "--- ${label}: ${file} ---" >> spec_context.txt
+            cat "$file" >> spec_context.txt
+            printf '\n\n' >> spec_context.txt
+          }
 
           # Authoritative ADRs, product specs, and platform reference docs were
           # assembled in the privileged build-context job and arrive purely as
@@ -405,23 +438,21 @@ jobs:
             printf '\n\n' >> spec_context.txt
           fi
 
-          if [ -f "AGENTS.md" ]; then
-            printf '%s\n' "--- REPO-LOCAL FILE: AGENTS.md ---" >> spec_context.txt
-            cat AGENTS.md >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          fi
+          add_context_file "AGENTS.md" "REPO-LOCAL FILE"
+          add_context_file ".github/copilot-instructions.md" "REPO-LOCAL FILE"
 
-          if [ -f ".github/copilot-instructions.md" ]; then
-            printf '%s\n' "--- REPO-LOCAL FILE: .github/copilot-instructions.md ---" >> spec_context.txt
-            cat .github/copilot-instructions.md >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          fi
+          while IFS= read -r f; do
+            f="${f#./}"
+            if [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
+              add_context_file "$f" "FILE"
+            fi
+          done < <(find . -maxdepth 1 -type f -name '*.md' | sort)
 
-          for f in *.md docs/*.md specs/*.md; do
-            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
-              printf '%s\n' "--- REPO-LOCAL FILE: $f ---" >> spec_context.txt
-              cat "$f" >> spec_context.txt
-              printf '\n\n' >> spec_context.txt
+          for dir in ".github/instructions" "docs/specs" "specs" "docs"; do
+            if [ -d "$dir" ]; then
+              while IFS= read -r f; do
+                add_context_file "$f" "FILE"
+              done < <(find "$dir" -type f -name '*.md' | sort)
             fi
           done
 
@@ -452,6 +483,7 @@ jobs:
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMIT_SHA: ${{ github.sha }}
           TRUNCATED: ${{ steps.diff.outputs.truncated }}
         run: |
           set -euo pipefail
@@ -464,13 +496,17 @@ jobs:
           if [ "${TRUNCATED}" = "true" ]; then
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
-          export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE
+          REVIEW_TARGET="Commit ${COMMIT_SHA}"
+          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+            REVIEW_TARGET="PR #${PR_NUMBER}: ${PR_TITLE}"
+          fi
+          export REPO REVIEW_TARGET TRUNCATION_LINE
 
           cat > prompt_template.txt <<'PROMPT_EOF'
-          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests against the platform's architectural decision records (ADRs), product specifications, and architectural standards.
+          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests and commits against the platform's architectural decision records (ADRs), product specifications, and architectural standards.
 
           REPOSITORY: ${REPO}
-          PR #${PR_NUMBER}: ${PR_TITLE}
+          REVIEW TARGET: ${REVIEW_TARGET}
           ${TRUNCATION_LINE}
 
           PLATFORM CONTEXT, ADRs, PRODUCT SPECS, AND CONTRACTS:
@@ -529,11 +565,10 @@ jobs:
               "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
               "${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8"),
               "${REPO}": os.environ["REPO"],
-              "${PR_TITLE}": os.environ["PR_TITLE"],
-              "${PR_NUMBER}": os.environ["PR_NUMBER"],
+              "${REVIEW_TARGET}": os.environ["REVIEW_TARGET"],
               "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
           }
-          pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\}")
+          pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\}")
           template = Path("prompt_template.txt").read_text(encoding="utf-8")
           prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
           leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
@@ -561,7 +596,7 @@ jobs:
 
           echo "$RESPONSE" | jq -r '.content[0].text // "Review failed: " + (.error.message // "unknown error")' > review.txt
 
-      - name: Post review comment
+      - name: Publish review output
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -578,23 +613,35 @@ jobs:
             TRUNCATION_NOTE="> ⚠️ **Diff truncated** — PR exceeds 80KB. Review covers the first portion only. Large PRs should be split."$'\n\n'
           fi
 
-          COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
+          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
+            COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
 
-          EXISTING_COMMENT_ID=$(
-            gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-              --paginate \
-              | jq -r --arg marker "$COMMENT_MARKER" '
-                map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
-                last |
-                .id // empty
-              '
-          )
+            EXISTING_COMMENT_ID=$(
+              gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                --paginate \
+                | jq -r --arg marker "$COMMENT_MARKER" '
+                  map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
+                  last |
+                  .id // empty
+                '
+            )
 
-          if [ -n "$EXISTING_COMMENT_ID" ]; then
-            gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
-              --method PATCH \
-              --raw-field body="$COMMENT"
+            if [ -n "$EXISTING_COMMENT_ID" ]; then
+              gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
+                --method PATCH \
+                --raw-field body="$COMMENT"
+            else
+              gh pr comment "$PR_NUMBER" \
+                --body "$COMMENT"
+            fi
           else
-            gh pr comment "$PR_NUMBER" \
-              --body "$COMMENT"
+            {
+              echo "## Claude Commit Review"
+              echo
+              if [ -n "$TRUNCATION_NOTE" ]; then
+                printf '%s' "$TRUNCATION_NOTE"
+              fi
+              cat review.txt
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Commit review generated for ${GITHUB_SHA}. See workflow summary for details."
           fi
