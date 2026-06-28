@@ -215,6 +215,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('"${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8")', self.workflow)
         self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\\}\")", self.workflow)
 
+    def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
+        self.assertIn("import sys", self.workflow)
+        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
+        self.assertIn("::error::Unsubstituted template variables in prompt:", self.workflow)
+        self.assertIn("sys.exit(1)", self.workflow)
+
     def test_review_comment_is_upserted_with_single_marker(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
         self.assertIn('issues/${PR_NUMBER}/comments', self.workflow)
