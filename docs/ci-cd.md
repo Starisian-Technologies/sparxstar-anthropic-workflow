@@ -27,7 +27,6 @@ The reusable workflow runs as two jobs so the composer-resolver App key never sh
 The trusted context (private ADR/product-spec content) is staged as a workflow artifact, which is downloadable by anyone with read access to the run — i.e. anyone on a public repository. `build-context` fails fast, before minting any token, unless `github.event.repository.private == true`. Invoke this workflow only from private repositories.
 
 ## Determinism controls
-- Consumer workflows should use both `pull_request` and `push` triggers so all PR updates and direct commits are reviewed
 - Consumer workflows should use both `pull_request` and `push` triggers for complete coverage, and must never use `pull_request_target` (the `review` job checks out PR-head code)
 - Diff and spec byte limits with explicit truncation notes
 - Single-comment update marker to avoid noisy comment sprawl
