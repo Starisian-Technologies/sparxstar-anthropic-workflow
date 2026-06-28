@@ -9,12 +9,9 @@
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 
 # Logs and temp files
 *.log
 *.tmp
 *.bak
-__pycache__/
-*.py[cod]

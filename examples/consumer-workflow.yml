@@ -10,6 +10,7 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
 
 jobs:
   review:

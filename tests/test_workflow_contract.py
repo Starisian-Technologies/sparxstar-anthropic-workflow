@@ -160,7 +160,7 @@ class WorkflowContractTests(unittest.TestCase):
     def test_trusted_context_loaded_before_repo_local(self) -> None:
         _, review = self._job_blocks()
         trusted = review.index("cat .spx-trusted-context/trusted_context.txt")
-        repo_local = review.index("REPO-LOCAL FILE: AGENTS.md")
+        repo_local = review.index('add_context_file "AGENTS.md" "REPO-LOCAL FILE"')
         # Trusted, canonical context must precede repo-local context so it
         # survives the 50KB cap.
         self.assertLess(trusted, repo_local)
@@ -183,14 +183,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("contents: read", self.workflow)
         self.assertIn("pull-requests: write", self.workflow)
 
-    def test_diff_step_has_fail_fast_guards(self) -> None:
-        start_marker = "- name: Get PR diff"
+    def test_diff_step_supports_pull_request_and_push(self) -> None:
+        start_marker = "- name: Get change diff"
         end_marker = "\n      - name:"
         start = self.workflow.index(start_marker)
         end = self.workflow.index(end_marker, start + len(start_marker))
         diff_step = self.workflow[start:end]
-        self.assertIn("No pull request number found", diff_step)
-        self.assertIn("PR diff is empty", diff_step)
+        self.assertIn('if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then', diff_step)
+        self.assertIn('elif [ "${EVENT_NAME}" = "push" ]; then', diff_step)
+        self.assertIn("Unsupported event", diff_step)
+        self.assertIn("Change diff is empty", diff_step)
         self.assertIn("set -euo pipefail", diff_step)
 
     def test_diff_truncation_is_capped_and_flagged(self) -> None:
@@ -213,13 +215,21 @@ class WorkflowContractTests(unittest.TestCase):
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)
         self.assertIn('"${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE)\\}\")", self.workflow)
+        self.assertIn('"${REVIEW_TARGET}": os.environ["REVIEW_TARGET"]', self.workflow)
+        self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\\}\")", self.workflow)
 
-    def test_review_comment_is_upserted_with_single_marker(self) -> None:
+    def test_review_output_handles_pr_and_commit(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
+        self.assertIn('if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then', self.workflow)
         self.assertIn('issues/${PR_NUMBER}/comments', self.workflow)
         self.assertIn('issues/comments/${EXISTING_COMMENT_ID}', self.workflow)
         self.assertIn('gh pr comment "$PR_NUMBER"', self.workflow)
+        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', self.workflow)
+
+    def test_spec_context_includes_required_paths(self) -> None:
+        self.assertIn('add_context_file "AGENTS.md" "REPO-LOCAL FILE"', self.workflow)
+        self.assertIn('add_context_file ".github/copilot-instructions.md" "REPO-LOCAL FILE"', self.workflow)
+        self.assertIn('for dir in ".github/instructions" "docs/specs" "specs" "docs"; do', self.workflow)
 
     def test_readme_documents_required_permissions_and_secret(self) -> None:
         self.assertIn("ANTHROPIC_API_KEY", self.readme)
