@@ -558,6 +558,7 @@ jobs:
           python3 - <<'PY'
           import os
           import re
+          import sys
           from pathlib import Path
 
           token_values = {
@@ -569,7 +570,11 @@ jobs:
           }
           pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\}")
           template = Path("prompt_template.txt").read_text(encoding="utf-8")
-          prompt = pattern.sub(lambda match: token_values[match.group(0)], template)
+          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
+          leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
+          if leftover:
+              print(f"::error::Unsubstituted template variables in prompt: {leftover}", file=sys.stderr)
+              sys.exit(1)
           Path("prompt.txt").write_text(prompt, encoding="utf-8")
           PY
 

@@ -218,6 +218,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('"${REVIEW_TARGET}": os.environ["REVIEW_TARGET"]', self.workflow)
         self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\\}\")", self.workflow)
 
+    def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
+        self.assertIn("import sys", self.workflow)
+        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
+        self.assertIn("::error::Unsubstituted template variables in prompt:", self.workflow)
+        self.assertIn("sys.exit(1)", self.workflow)
+
     def test_review_output_handles_pr_and_commit(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
         self.assertIn('if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then', self.workflow)
