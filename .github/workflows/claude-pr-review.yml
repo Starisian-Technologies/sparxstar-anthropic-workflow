@@ -510,7 +510,7 @@ except Exception as e:
             # -print -quit stops at first match — O(1) rather than materialising the full list.
             if [ -d "$dir" ] && [ -n "$(find "$dir" -name '*.md' -type f -print -quit 2>/dev/null)" ]; then
               find "$dir" -type f -name '*.md' | sort | while IFS= read -r f; do
-                printf '--- %s ---\n' "$f"
+                printf -- '--- %s ---\n' "$f"
                 cat "$f"
                 printf '\n\n'
               done >> "$output"
