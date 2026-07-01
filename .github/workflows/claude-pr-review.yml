@@ -342,7 +342,7 @@ jobs:
               except UnicodeDecodeError:
                   data = data[:-1]
           source_path.write_bytes(data)
-PY
+          PY
             echo "truncated=true" >> "$GITHUB_OUTPUT"
           else
             echo "truncated=false" >> "$GITHUB_OUTPUT"
@@ -453,7 +453,7 @@ except Exception as e:
         f.write("contracts_ids=(parse error)\n")
         f.write("adrs_ids=(parse error)\n")
         f.write("has_declaration=false\n")
-PY
+          PY
 
       - name: Load three-tier context
         run: |
@@ -477,7 +477,7 @@ PY
               except UnicodeDecodeError:
                   data = data[:-1]
           path.write_bytes(data)
-PY
+          PY
               echo "::warning::${label} tier truncated to ${max_bytes} bytes."
             fi
           }
@@ -489,7 +489,22 @@ PY
             local label="$4"
             local fallback="${5:-}"
 
+            # Guard: refuse symlinks on the output path — a PR can pre-plant one
+            # to redirect writes anywhere on the runner filesystem.
+            if [ -L "$output" ]; then
+              echo "::error::$output is a symlink — aborting to prevent path traversal."
+              exit 1
+            fi
+            rm -f "$output"
             : > "$output"
+
+            # Guard: refuse symlinks on the tier directory — GNU find follows
+            # command-line symlinks by default and could traverse unexpected paths.
+            if [ -L "$dir" ]; then
+              echo "::warning::$dir is a symlink — skipping tier to prevent traversal."
+              printf '# No %s content available — tier directory is a symlink.\n' "$label" > "$output"
+              return
+            fi
 
             # Prefer fetch-specs artifact dir if it contains any .md files.
             # -print -quit stops at first match — O(1) rather than materialising the full list.
@@ -528,6 +543,11 @@ PY
             ".spx-trusted-context/tier_adrs.txt"
 
           # Platform reference — from build-context artifact only (never in .sparxstar/).
+          if [ -L "platform_ref.txt" ]; then
+            echo "::error::platform_ref.txt is a symlink — aborting to prevent path traversal."
+            exit 1
+          fi
+          rm -f platform_ref.txt
           : > platform_ref.txt
           if [ -f ".spx-trusted-context/platform_ref.txt" ] && [ -s ".spx-trusted-context/platform_ref.txt" ]; then
             cat ".spx-trusted-context/platform_ref.txt" >> platform_ref.txt
@@ -535,6 +555,11 @@ PY
           truncate_to_bytes "platform_ref.txt" 15000 "Platform reference"
 
           # Repo-level agent context (AGENTS.md, copilot instructions).
+          if [ -L "repo_context.txt" ]; then
+            echo "::error::repo_context.txt is a symlink — aborting to prevent path traversal."
+            exit 1
+          fi
+          rm -f repo_context.txt
           : > repo_context.txt
           if [ -f "AGENTS.md" ]; then
             cat AGENTS.md >> repo_context.txt
@@ -672,7 +697,7 @@ PY
           — none.
 
           Be specific. Reference actual line content from the diff. Skip issues linters catch unless security-critical. Each finding must name the tier and the rule or document that triggered it.
-PROMPT_EOF
+          PROMPT_EOF
 
           python3 - <<'PY'
           import os
@@ -714,7 +739,7 @@ PROMPT_EOF
               sys.exit(1)
           prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
           Path("prompt.txt").write_text(prompt, encoding="utf-8")
-PY
+          PY
 
           jq -n \
             --arg model "claude-sonnet-4-6" \
