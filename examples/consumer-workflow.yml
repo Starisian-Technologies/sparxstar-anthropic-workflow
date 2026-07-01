@@ -10,7 +10,6 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  push:
 
 jobs:
   # Job 1: fetch specs, contracts, and ADRs declared in sparxstar-specs.yml.

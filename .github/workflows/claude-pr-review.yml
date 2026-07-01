@@ -85,7 +85,7 @@ jobs:
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
         env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_REF: ${{ github.job_workflow_ref }}
         run: |
           set -euo pipefail
           WORKFLOW_REF="${WORKFLOW_REF:-}"
@@ -370,7 +370,7 @@ jobs:
       - name: Download spec artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.specs-artifact }}
+          name: ${{ inputs['specs-artifact'] }}
           # Extract to an isolated directory, not the repo root, so PR-head code
           # cannot pre-populate .sparxstar/ to inject content into tier context.
           path: .spx-specs-artifact
