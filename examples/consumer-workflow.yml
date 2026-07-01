@@ -21,7 +21,8 @@ jobs:
   fetch-specs:
     permissions:
       contents: read
-    uses: Starisian-Technologies/sparxstar-product-specification-registry/.github/workflows/fetch-specs.yml@v1
+    # Pin to the immutable release tag @v1.0.0; @v1 is the moving major alias.
+    uses: Starisian-Technologies/sparxstar-product-specification-registry/.github/workflows/fetch-specs.yml@v1.0.0
     # No secrets block needed — read token minted from the org-level composer-resolver GitHub App.
 
   # Job 2: three-pass Claude review consuming the fetched artifact.
