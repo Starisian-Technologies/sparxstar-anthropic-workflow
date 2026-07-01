@@ -10,10 +10,24 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-  push:
 
 jobs:
+  # Job 1: fetch specs, contracts, and ADRs declared in sparxstar-specs.yml.
+  # Produces artifact "sparxstar-specs" containing:
+  #   .sparxstar/specs/agent/   — repo spec at agent_ref (always main)
+  #   .sparxstar/contracts/     — cross-repo contracts this repo is party to
+  #   .sparxstar/adrs/          — ADRs that govern this repo
+  # Scope is read from sparxstar-specs.yml at repo root — not hardcoded here.
+  fetch-specs:
+    permissions:
+      contents: read
+    # Pin to the immutable release tag @v1.0.0; @v1 is the moving major alias.
+    uses: Starisian-Technologies/sparxstar-product-specification-registry/.github/workflows/fetch-specs.yml@v1.0.0
+    # No secrets block needed — read token minted from the org-level composer-resolver GitHub App.
+
+  # Job 2: three-pass Claude review consuming the fetched artifact.
   review:
+    needs: fetch-specs
     permissions:
       contents: read
       pull-requests: write
@@ -29,3 +43,4 @@ jobs:
       # Pass each secret by name (not `secrets: inherit`).
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
+    # specs-artifact input defaults to "sparxstar-specs" — matches fetch-specs.yml output.

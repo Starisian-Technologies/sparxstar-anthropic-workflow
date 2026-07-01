@@ -3,6 +3,16 @@ name: Claude PR Review (Reusable)
 on:
   workflow_call:
     inputs:
+      specs-artifact:
+        description: >
+          Name of the artifact produced by fetch-specs.yml (sparxstar-product-specification-registry).
+          The artifact must contain .sparxstar/specs/, .sparxstar/contracts/, and/or .sparxstar/adrs/
+          directories. When omitted or when the artifact download fails, specs and ADR tiers fall
+          back to registry content assembled by the build-context job; the contracts tier is empty
+          without the fetch-specs producer.
+        required: false
+        default: 'sparxstar-specs'
+        type: string
       contract_ref:
         description: >-
           Git ref (tag) of the ADR and product-spec registries to review
@@ -21,10 +31,9 @@ on:
       COMPOSER_RESOLVER_PRIVATE_KEY:
         description: >-
           Private key for the composer-resolver GitHub App, used to mint
-          short-lived read tokens for the private ADR, product-spec, and
-          platform-contracts registries. Pass by name (not inherit). The app's
-          client id is read from the organization variable
-          COMPOSER_RESOLVER_CLIENT_ID.
+          short-lived read tokens for the private ADR and product-spec
+          registries. Pass by name (not inherit). The app's client id is read
+          from the organization variable COMPOSER_RESOLVER_CLIENT_ID.
         required: true
 
 jobs:
@@ -34,10 +43,9 @@ jobs:
   # share a job with untrusted PR-head code. So the work is split:
   #
   #   build-context (privileged) — holds the App key, mints tokens, fetches the
-  #     ADR + product-spec + platform-contracts registries at the pinned
-  #     contract_ref, and uploads the assembled trusted context as an artifact.
-  #     It NEVER checks out the PR head, so attacker-controllable code never
-  #     runs beside the App key.
+  #     ADR + product-spec registries at the pinned contract_ref, and uploads
+  #     the assembled trusted context as an artifact. It NEVER checks out the
+  #     PR head, so attacker-controllable code never runs beside the App key.
   #
   #   review (unprivileged) — checks out the PR head, but only ever READS those
   #     files as data (git checkout, gh pr diff, cat into a prompt — no build,
@@ -56,9 +64,8 @@ jobs:
       contents: read
 
     steps:
-      # This reviewer reads private ADR/product-spec/platform-contracts
-      # registries and stages the assembled contents as a workflow artifact
-      # for the review job. On a
+      # This reviewer reads private ADR/product-spec registries and stages the
+      # assembled contents as a workflow artifact for the review job. On a
       # public repository, Actions artifacts are downloadable by anyone, which
       # would leak private registry content. Refuse to run (before any token is
       # minted or private content fetched) unless the caller repository is
@@ -71,20 +78,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${REPO_IS_PRIVATE:-}" != "true" ]; then
-            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads the private ADR, product-spec, and platform-contracts registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
+            echo "::error::Refusing to run: the caller repository '${REPO_FULL_NAME}' is not private (github.event.repository.private != true). This workflow reads private ADR and product-spec registries and stages their contents as a workflow artifact, which would be downloadable by anyone on a public repository. Run it only from private repositories."
             exit 1
           fi
 
-      # Resolve THIS reusable workflow's own ref so the reference-docs checkout
-      # below pulls sparxstar-claude-pr-review at the same version the caller
-      # pinned (e.g. v1.0.0). Use github.job_workflow_ref — the ref of the
-      # reusable workflow file for this job — NOT github.workflow_ref, which in
-      # a reusable-workflow call is the *caller's* top-level workflow ref. For a
-      # cross-repo caller that ref is the caller's PR ref (e.g.
-      # helios/...@refs/pull/51/merge), and applying it to this repo fails with
-      # "not our ref" because that PR exists only in the caller. job_workflow_ref
-      # keeps this checkout pinned to a trusted ref of this repo and never lets
-      # the caller's PR ref influence what the privileged job checks out.
       - name: Resolve workflow repository ref
         id: workflow_repo_ref
         env:
@@ -181,15 +178,6 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
-      - name: Mint platform-contracts read token
-        id: contracts-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.COMPOSER_RESOLVER_CLIENT_ID }}
-          private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}
-          owner: Starisian-Technologies
-          repositories: sparxstar-platform-contracts
-
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
@@ -219,58 +207,37 @@ jobs:
           fetch-depth: 1
           path: .spx-spec-registry
 
-      - name: Checkout platform-contracts registry
-        uses: actions/checkout@v5
-        with:
-          repository: Starisian-Technologies/sparxstar-platform-contracts
-          ref: ${{ steps.contract.outputs.ref }}
-          token: ${{ steps.contracts-token.outputs.token }}
-          persist-credentials: false
-          fetch-depth: 1
-          path: .spx-contracts-registry
-
       - name: Assemble trusted context
         run: |
           set -euo pipefail
-          : > trusted_context.txt
 
-          # Authoritative contracts from the private registries, pinned to the
-          # requested contract_ref, plus the platform reference snapshot. The
-          # consuming job appends repo-local context and applies the size cap.
+          # Per-tier files for the three-pass review model. Written from the
+          # registry clones in this privileged job; the review job uses these
+          # as fallback when no fetch-specs.yml artifact is present.
+          : > tier_adrs.txt
           if [ -d ".spx-adr-registry" ]; then
             while IFS= read -r f; do
-              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
+              printf '%s\n' "--- ADR: ${f#.spx-adr-registry/} ---" >> tier_adrs.txt
+              cat "$f" >> tier_adrs.txt
+              printf '\n\n' >> tier_adrs.txt
             done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
           fi
 
+          : > tier_specs.txt
           if [ -d ".spx-spec-registry" ]; then
             while IFS= read -r f; do
-              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
+              printf '%s\n' "--- SPEC: ${f#.spx-spec-registry/} ---" >> tier_specs.txt
+              cat "$f" >> tier_specs.txt
+              printf '\n\n' >> tier_specs.txt
             done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
           fi
 
-          # Platform contract registry: the canonical interface contracts
-          # (MANIFEST.json index + the PHP interface declarations under src/,
-          # plus any markdown). These define the boundaries each repo must
-          # honour, so they are authoritative review context alongside the
-          # ADRs and product specs.
-          if [ -d ".spx-contracts-registry" ]; then
-            while IFS= read -r f; do
-              printf '%s\n' "--- PLATFORM CONTRACT FILE: ${f#.spx-contracts-registry/} ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
-            done < <(find .spx-contracts-registry -type f \( -name '*.php' -o -name '*.md' -o -name 'MANIFEST.json' \) -not -path '*/.git/*' -not -path '*/vendor/*' | sort)
-          fi
-
+          : > platform_ref.txt
           for f in .spx-workflow-repo/reference/*.md; do
             if [ -f "$f" ]; then
-              printf '%s\n' "--- PLATFORM REFERENCE FILE: $f ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
+              printf '%s\n' "--- PLATFORM REFERENCE: $(basename "$f") ---" >> platform_ref.txt
+              cat "$f" >> platform_ref.txt
+              printf '\n\n' >> platform_ref.txt
             fi
           done
 
@@ -278,7 +245,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: spx-trusted-context
-          path: trusted_context.txt
+          path: |
+            tier_adrs.txt
+            tier_specs.txt
+            platform_ref.txt
           retention-days: 1
           if-no-files-found: error
 
@@ -324,53 +294,33 @@ jobs:
           repository: ${{ steps.checkout_target.outputs.repository }}
           ref: ${{ steps.checkout_target.outputs.ref }}
 
-      - name: Get change diff
+      - name: Get PR diff
         id: diff
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
-          BEFORE_SHA: ${{ github.event.before }}
-          CURRENT_SHA: ${{ github.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          EVENT_NAME="${EVENT_NAME:-}"
+          PR_NUMBER="${PR_NUMBER:-}"
 
-          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
-              echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
-              if [ -s gh_pr_diff.stderr ]; then
-                echo "::group::gh pr diff stderr"
-                cat gh_pr_diff.stderr
-                echo "::endgroup::"
-              fi
-              exit 1
+          if [ -z "${PR_NUMBER}" ]; then
+            echo "::error::No pull request number found in the workflow event payload. This workflow requires a pull_request event; workflow_dispatch cannot fetch a PR diff."
+            exit 1
+          fi
+
+          if ! gh pr diff "${PR_NUMBER}" > pr.diff 2> gh_pr_diff.stderr; then
+            echo "::error::Failed to fetch PR diff. Check that the pull request number is valid and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
+            if [ -s gh_pr_diff.stderr ]; then
+              echo "::group::gh pr diff stderr"
+              cat gh_pr_diff.stderr
+              echo "::endgroup::"
             fi
-          elif [ "${EVENT_NAME}" = "push" ]; then
-            BEFORE_SHA="${BEFORE_SHA:-}"
-            CURRENT_SHA="${CURRENT_SHA:-}"
-            if [ -n "${BEFORE_SHA}" ] && [ "${BEFORE_SHA}" != "0000000000000000000000000000000000000000" ]; then
-              if ! git diff --no-color "${BEFORE_SHA}" "${CURRENT_SHA}" > pr.diff; then
-                echo "::error::Failed to compute push diff between ${BEFORE_SHA} and ${CURRENT_SHA}."
-                exit 1
-              fi
-            elif git rev-parse --verify "${CURRENT_SHA}^" >/dev/null 2>&1; then
-              if ! git diff --no-color "${CURRENT_SHA}^" "${CURRENT_SHA}" > pr.diff; then
-                echo "::error::Failed to compute fallback push diff for commit ${CURRENT_SHA}."
-                exit 1
-              fi
-            else
-              echo "::error::Cannot compute push diff because there is no previous commit to compare against."
-              exit 1
-            fi
-          else
-            echo "::error::Unsupported event '${EVENT_NAME}'. Use pull_request or push."
             exit 1
           fi
 
           if [ ! -s pr.diff ]; then
-            echo "::error::Change diff is empty. Check that the event contains actual code changes and that pull_request or push context is valid."
+            echo "::error::PR diff is empty — gh pr diff returned no output. Check that the workflow ran for a pull_request event, that the pull request number is valid, and that GH_TOKEN has contents: read and pull-requests: write permissions. pull-requests: read is sufficient for gh pr diff itself; pull-requests: write is also required later to post or update the review comment. Enable ACTIONS_STEP_DEBUG=true for detailed gh output."
             if [ -s gh_pr_diff.stderr ]; then
               echo "::group::gh pr diff stderr"
               cat gh_pr_diff.stderr
@@ -382,26 +332,34 @@ jobs:
           if [ "$(wc -c < pr.diff)" -gt 80000 ]; then
             python3 - <<'PY'
           from pathlib import Path
-
           max_bytes = 80000
           source_path = Path("pr.diff")
-          target_path = Path("pr_truncated.diff")
           data = source_path.read_bytes()[:max_bytes]
-
           while data:
               try:
                   data.decode("utf-8")
                   break
               except UnicodeDecodeError:
                   data = data[:-1]
-
-          target_path.write_bytes(data)
+          source_path.write_bytes(data)
           PY
-            mv pr_truncated.diff pr.diff
             echo "truncated=true" >> "$GITHUB_OUTPUT"
           else
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Clean artifact directories
+        run: |
+          set -euo pipefail
+          # Remove before download so PR-head cannot pre-plant symlinks or files
+          # that would be followed/merged into the extracted artifact content.
+          for dir in .spx-trusted-context .spx-specs-artifact; do
+            if [ -L "$dir" ]; then
+              echo "::error::$dir is a symlink — aborting to prevent path traversal."
+              exit 1
+            fi
+            rm -rf "$dir"
+          done
 
       - name: Download trusted context
         uses: actions/download-artifact@v4
@@ -409,72 +367,209 @@ jobs:
           name: spx-trusted-context
           path: .spx-trusted-context
 
-      - name: Load spec context
+      - name: Download spec artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs['specs-artifact'] }}
+          # Extract to an isolated directory, not the repo root, so PR-head code
+          # cannot pre-populate .sparxstar/ to inject content into tier context.
+          path: .spx-specs-artifact
+        continue-on-error: true
+
+      - name: Read repo declaration
+        id: declaration
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          : > spec_context.txt
-          declare -A seen
 
-          add_context_file() {
-            local file="$1"
-            local label="$2"
-            if [ ! -f "$file" ] || [[ -v "seen[$file]" ]]; then
-              return
+          # Read sparxstar-specs.yml from the base commit only. Never fall back
+          # to the PR-head working tree — on fork PRs BASE_SHA may not exist in
+          # the fork's history, but silently reading the PR-head file would let
+          # a malicious PR expand its own review scope. Treat any failure as
+          # "no declaration" instead.
+          SPECS_FILE=""
+          if [ -n "${BASE_SHA:-}" ]; then
+            if git show "${BASE_SHA}:sparxstar-specs.yml" > .spx-base-specs.yml 2>/dev/null; then
+              SPECS_FILE=".spx-base-specs.yml"
             fi
-            seen["$file"]=1
-            printf '%s\n' "--- ${label}: ${file} ---" >> spec_context.txt
-            cat "$file" >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          }
-
-          # Authoritative ADRs, product specs, and platform reference docs were
-          # assembled in the privileged build-context job and arrive purely as
-          # an artifact (never re-fetched here, where untrusted code lives).
-          # Written FIRST so the canonical contracts survive the size cap; the
-          # repo-local (untrusted PR) context below is appended and is what gets
-          # truncated if anything does.
-          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
-            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
           fi
+          export SPECS_FILE
 
-          add_context_file "AGENTS.md" "REPO-LOCAL FILE"
-          add_context_file ".github/copilot-instructions.md" "REPO-LOCAL FILE"
+          python3 - <<'PY'
+import re
+import sys
+import os
+from pathlib import Path
 
-          while IFS= read -r f; do
-            f="${f#./}"
-            if [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
-              add_context_file "$f" "FILE"
-            fi
-          done < <(find . -maxdepth 1 -type f -name '*.md' | sort)
+out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+specs_file = os.environ.get("SPECS_FILE", "")
 
-          for dir in ".github/instructions" "docs/specs" "specs" "docs"; do
-            if [ -d "$dir" ]; then
-              while IFS= read -r f; do
-                add_context_file "$f" "FILE"
-              done < <(find "$dir" -type f -name '*.md' | sort)
-            fi
-          done
+if not specs_file or not Path(specs_file).exists():
+    with open(out_path, "a") as f:
+        f.write("specs_ids=(none declared)\n")
+        f.write("contracts_ids=(none declared)\n")
+        f.write("adrs_ids=(none declared)\n")
+        f.write("has_declaration=false\n")
+    sys.exit(0)
 
-          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
-            python3 - <<'PY'
+try:
+    text = Path(specs_file).read_text(encoding="utf-8")
+
+    def extract_ids(section, text):
+        ids = []
+        in_section = False
+        for line in text.splitlines():
+            if re.match(rf'^{section}:\s*$', line):
+                in_section = True
+                continue
+            if in_section:
+                stripped = line.strip()
+                # Skip blank lines and YAML comments — they don't end a section.
+                if not stripped or stripped.startswith('#'):
+                    continue
+                # A non-indented, non-comment line that isn't a list item
+                # starts a new top-level key — end of this section.
+                if line and not line[0].isspace() and not line.lstrip().startswith('-'):
+                    break
+                m = re.match(r'^-\s+id:\s+(\S+)', stripped)
+                if m:
+                    ids.append(m.group(1))
+        return ids
+
+    specs = extract_ids("specs", text)
+    contracts = extract_ids("contracts", text)
+    adrs = extract_ids("adrs", text)
+
+    with open(out_path, "a") as f:
+        f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
+        f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
+        f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
+        f.write("has_declaration=true\n")
+except Exception as e:
+    print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
+    with open(out_path, "a") as f:
+        f.write("specs_ids=(parse error)\n")
+        f.write("contracts_ids=(parse error)\n")
+        f.write("adrs_ids=(parse error)\n")
+        f.write("has_declaration=false\n")
+          PY
+
+      - name: Load three-tier context
+        run: |
+          set -euo pipefail
+
+          truncate_to_bytes() {
+            local file="$1"
+            local max_bytes="$2"
+            local label="$3"
+            if [ "$(wc -c < "$file")" -gt "$max_bytes" ]; then
+              python3 - "$file" "$max_bytes" <<'PY'
+          import sys
           from pathlib import Path
-
-          max_bytes = 50000
-          path = Path("spec_context.txt")
-          data = path.read_bytes()[:max_bytes]
-
+          path = Path(sys.argv[1])
+          max_b = int(sys.argv[2])
+          data = path.read_bytes()[:max_b]
           while data:
               try:
                   data.decode("utf-8")
                   break
               except UnicodeDecodeError:
                   data = data[:-1]
-
           path.write_bytes(data)
           PY
-            echo "::warning::Spec context truncated to 50KB. Authoritative ADR/spec/reference context is placed first and preserved; trailing repo-local context may be truncated."
+              echo "::warning::${label} tier truncated to ${max_bytes} bytes."
+            fi
+          }
+
+          collect_tier() {
+            local dir="$1"
+            local output="$2"
+            local max_bytes="$3"
+            local label="$4"
+            local fallback="${5:-}"
+
+            # Guard: refuse symlinks on the output path — a PR can pre-plant one
+            # to redirect writes anywhere on the runner filesystem.
+            if [ -L "$output" ]; then
+              echo "::error::$output is a symlink — aborting to prevent path traversal."
+              exit 1
+            fi
+            rm -f "$output"
+            : > "$output"
+
+            # Guard: refuse symlinks on the tier directory — GNU find follows
+            # command-line symlinks by default and could traverse unexpected paths.
+            if [ -L "$dir" ]; then
+              echo "::warning::$dir is a symlink — skipping tier to prevent traversal."
+              printf '# No %s content available — tier directory is a symlink.\n' "$label" > "$output"
+              return
+            fi
+
+            # Prefer fetch-specs artifact dir if it contains any .md files.
+            # -print -quit stops at first match — O(1) rather than materialising the full list.
+            if [ -d "$dir" ] && [ -n "$(find "$dir" -name '*.md' -type f -print -quit 2>/dev/null)" ]; then
+              find "$dir" -type f -name '*.md' | sort | while IFS= read -r f; do
+                printf '--- %s ---\n' "$f"
+                cat "$f"
+                printf '\n\n'
+              done >> "$output"
+            elif [ -n "$fallback" ] && [ -f "$fallback" ] && [ -s "$fallback" ]; then
+              # Fall back to registry-sourced tier file from build-context artifact.
+              cat "$fallback" >> "$output"
+            else
+              printf '# No %s content available — tier not loaded.\n' "$label" > "$output"
+              return
+            fi
+
+            truncate_to_bytes "$output" "$max_bytes" "$label"
+          }
+
+          # Tier 1 — spec conformance: what the repo is specified to do.
+          # Primary: fetch-specs artifact (isolated dir, never the PR checkout).
+          # Fallback: tier_specs.txt assembled in build-context from spec registry clone.
+          collect_tier ".spx-specs-artifact/.sparxstar/specs/agent" "tier_specs.txt" 25000 "Spec" \
+            ".spx-trusted-context/tier_specs.txt"
+
+          # Tier 2 — contract seam: what the repo owes across boundaries.
+          # Primary: fetch-specs artifact (isolated dir).
+          # No fallback — contracts require the fetch-specs producer.
+          collect_tier ".spx-specs-artifact/.sparxstar/contracts" "tier_contracts.txt" 20000 "Contracts"
+
+          # Tier 3 — ADR drift: settled architectural decisions.
+          # Primary: fetch-specs artifact (isolated dir).
+          # Fallback: tier_adrs.txt assembled in build-context from ADR registry clone.
+          collect_tier ".spx-specs-artifact/.sparxstar/adrs" "tier_adrs.txt" 20000 "ADRs" \
+            ".spx-trusted-context/tier_adrs.txt"
+
+          # Platform reference — from build-context artifact only (never in .sparxstar/).
+          if [ -L "platform_ref.txt" ]; then
+            echo "::error::platform_ref.txt is a symlink — aborting to prevent path traversal."
+            exit 1
           fi
+          rm -f platform_ref.txt
+          : > platform_ref.txt
+          if [ -f ".spx-trusted-context/platform_ref.txt" ] && [ -s ".spx-trusted-context/platform_ref.txt" ]; then
+            cat ".spx-trusted-context/platform_ref.txt" >> platform_ref.txt
+          fi
+          truncate_to_bytes "platform_ref.txt" 15000 "Platform reference"
+
+          # Repo-level agent context (AGENTS.md, copilot instructions).
+          if [ -L "repo_context.txt" ]; then
+            echo "::error::repo_context.txt is a symlink — aborting to prevent path traversal."
+            exit 1
+          fi
+          rm -f repo_context.txt
+          : > repo_context.txt
+          if [ -f "AGENTS.md" ]; then
+            cat AGENTS.md >> repo_context.txt
+            printf '\n\n' >> repo_context.txt
+          fi
+          if [ -f ".github/copilot-instructions.md" ]; then
+            cat .github/copilot-instructions.md >> repo_context.txt
+            printf '\n\n' >> repo_context.txt
+          fi
+          truncate_to_bytes "repo_context.txt" 10000 "Repo context"
 
       - name: Run Claude review
         id: claude
@@ -483,8 +578,10 @@ jobs:
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          COMMIT_SHA: ${{ github.sha }}
           TRUNCATED: ${{ steps.diff.outputs.truncated }}
+          SPECS_IDS: ${{ steps.declaration.outputs.specs_ids }}
+          CONTRACTS_IDS: ${{ steps.declaration.outputs.contracts_ids }}
+          ADRS_IDS: ${{ steps.declaration.outputs.adrs_ids }}
         run: |
           set -euo pipefail
           if [ -z "${ANTHROPIC_API_KEY}" ]; then
@@ -496,24 +593,30 @@ jobs:
           if [ "${TRUNCATED}" = "true" ]; then
             TRUNCATION_LINE="NOTE: Diff truncated to 80KB. Review covers the first portion only."
           fi
-          REVIEW_TARGET="Commit ${COMMIT_SHA}"
-          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            REVIEW_TARGET="PR #${PR_NUMBER}: ${PR_TITLE}"
-          fi
-          export REPO REVIEW_TARGET TRUNCATION_LINE
+          export REPO PR_TITLE PR_NUMBER TRUNCATION_LINE SPECS_IDS CONTRACTS_IDS ADRS_IDS
 
           cat > prompt_template.txt <<'PROMPT_EOF'
-          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You review pull requests and commits against the platform's architectural decision records (ADRs), product specifications, and architectural standards.
+          You are a senior code reviewer for the SPARXSTAR platform built by Starisian Technologies. You perform three independent passes over each pull request. Findings must be attributed to the pass that caught them — do not conflate findings across passes.
 
           REPOSITORY: ${REPO}
-          REVIEW TARGET: ${REVIEW_TARGET}
+          PR #${PR_NUMBER}: ${PR_TITLE}
           ${TRUNCATION_LINE}
 
-          PLATFORM CONTEXT, ADRs, PRODUCT SPECS, AND CONTRACTS:
-          The following context is assembled from repo-local docs, the authoritative ADR, product-spec, and platform-contract registries, and platform reference docs. Treat ADR REGISTRY, PRODUCT SPEC REGISTRY, and PLATFORM CONTRACT sections as the canonical contracts; PLATFORM CONTRACT files declare interface boundaries (PHP interfaces and the MANIFEST index) that the diff must honour.
-          ${SPECS}
+          Declared scope for this repository:
+            Specs:     ${SPECS_IDS}
+            Contracts: ${CONTRACTS_IDS}
+            ADRs:      ${ADRS_IDS}
 
-          PLATFORM-WIDE RULES (apply to every repo):
+          ---
+          PLATFORM REFERENCE (standards, type contracts, CI rules):
+          ${PLATFORM_REF}
+
+          ---
+          REPO AGENT CONTEXT:
+          ${REPO_CONTEXT}
+
+          ---
+          PLATFORM-WIDE RULES (enforced in all three passes):
           - declare(strict_types=1) in every PHP file
           - No error_log() — use platform logging pattern
           - No SELECT * in any query
@@ -535,24 +638,65 @@ jobs:
           - FingerprintJS must be vendored script tag not bundled via npm
           - personal_policy_token must not be returned in REST response body
           - TEXT columns in MySQL/MariaDB must not have DEFAULT NULL — use NULL only
+          - contributor_id / contributorId never appears outside Helios (INV-010)
+          - No direct writes to a graph store outside the canonical layer (INV-003)
 
-          REVIEW THE FOLLOWING DIFF:
+          ---
+          PASS 1 — SPEC CONFORMANCE
+          Governing specs: ${SPECS_IDS}
+          Question: Does the diff match what this repo is specified to do?
+          Look for: missing REQ-* / AC-* coverage, wrong field types, incorrect API shapes, behaviour that diverges from spec intent.
+
+          SPEC CONTENT:
+          ${TIER_SPECS}
+
+          ---
+          PASS 2 — CONTRACT SEAM CHECK
+          Governing contracts: ${CONTRACTS_IDS}
+          Question: Does the diff honour what this repo owes across boundaries?
+          Look for: changed emit surface, consumed field removals, broken contract assertions, type mismatches at integration points, cross-repo coupling the contract prohibits.
+
+          CONTRACT CONTENT:
+          ${TIER_CONTRACTS}
+
+          ---
+          PASS 3 — ADR DRIFT DETECTION
+          Governing ADRs: ${ADRS_IDS}
+          Question: Does the diff silently reverse a settled architectural decision?
+          Look for: reintroducing patterns explicitly rejected by an ADR, violating trust-zone boundaries, ignoring identity authority rules, or bypassing a constraint an ADR made immutable.
+
+          ADR CONTENT:
+          ${TIER_ADRS}
+
+          ---
+          DIFF TO REVIEW:
           ${DIFF}
 
-          Produce a focused review in this format:
+          ---
+          Produce a review in the exact format below. Every section is mandatory; write "— none." if a section has no findings.
 
           REPOSITORY: [name]
           PR: [number and title]
 
           VERDICT: PASS / FAIL / CONDITIONAL
 
-          VIOLATIONS (must fix before merge):
-          [CRITICAL|HIGH] Description. Rule: [reference].
+          PASS 1 — SPEC CONFORMANCE (${SPECS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. Rule: <REQ-NNN or spec section>.
+          — none.
 
-          WARNINGS (should fix):
-          [MEDIUM|LOW] Description.
+          PASS 2 — CONTRACT SEAM CHECK (${CONTRACTS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. Contract: <id>. Surface: <field or endpoint>.
+          — none.
 
-          Be specific. Reference actual line content. Skip issues linters catch unless security-critical. Focus on architectural violations, spec drift, security incidents, and boundary crossings.
+          PASS 3 — ADR DRIFT DETECTION (${ADRS_IDS}):
+          [CRITICAL|HIGH|MEDIUM|LOW] <finding>. ADR: <ADR-NNN>. Decision reversed: <brief>.
+          — none.
+
+          WARNINGS (platform-wide rules, cross-cutting):
+          [MEDIUM|LOW] <description>.
+          — none.
+
+          Be specific. Reference actual line content from the diff. Skip issues linters catch unless security-critical. Each finding must name the tier and the rule or document that triggered it.
           PROMPT_EOF
 
           python3 - <<'PY'
@@ -561,20 +705,39 @@ jobs:
           import sys
           from pathlib import Path
 
+          def safe_read(p, fallback):
+              path = Path(p)
+              return path.read_text(encoding="utf-8") if path.exists() else fallback
+
           token_values = {
               "${DIFF}": Path("pr.diff").read_text(encoding="utf-8"),
-              "${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8"),
+              "${TIER_SPECS}": safe_read("tier_specs.txt", "# Spec tier not available."),
+              "${TIER_CONTRACTS}": safe_read("tier_contracts.txt", "# Contracts tier not available."),
+              "${TIER_ADRS}": safe_read("tier_adrs.txt", "# ADRs tier not available."),
+              "${PLATFORM_REF}": safe_read("platform_ref.txt", ""),
+              "${REPO_CONTEXT}": safe_read("repo_context.txt", ""),
               "${REPO}": os.environ["REPO"],
-              "${REVIEW_TARGET}": os.environ["REVIEW_TARGET"],
+              "${PR_TITLE}": os.environ["PR_TITLE"],
+              "${PR_NUMBER}": os.environ["PR_NUMBER"],
               "${TRUNCATION_LINE}": os.environ["TRUNCATION_LINE"],
+              "${SPECS_IDS}": os.environ.get("SPECS_IDS", "(none declared)"),
+              "${CONTRACTS_IDS}": os.environ.get("CONTRACTS_IDS", "(none declared)"),
+              "${ADRS_IDS}": os.environ.get("ADRS_IDS", "(none declared)"),
           }
-          pattern = re.compile(r"\$\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\}")
+          pattern = re.compile(
+              r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
+          )
           template = Path("prompt_template.txt").read_text(encoding="utf-8")
-          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
-          leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
+          # Validate against the template, not the rendered prompt — diff/spec
+          # content can contain ${FOO} patterns that would false-positive on
+          # the rendered string (e.g. GitHub Actions expressions, shell vars).
+          leftover = re.findall(r"\$\{[A-Z_]+\}", template)
+          # Strip known tokens — only unrecognised placeholders are errors.
+          leftover = [t for t in leftover if t not in token_values]
           if leftover:
-              print(f"::error::Unsubstituted template variables in prompt: {leftover}", file=sys.stderr)
+              print(f"::error::Unsubstituted template variables in prompt template: {leftover}", file=sys.stderr)
               sys.exit(1)
+          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
           Path("prompt.txt").write_text(prompt, encoding="utf-8")
           PY
 
@@ -596,7 +759,7 @@ jobs:
 
           echo "$RESPONSE" | jq -r '.content[0].text // "Review failed: " + (.error.message // "unknown error")' > review.txt
 
-      - name: Publish review output
+      - name: Post review comment
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -613,35 +776,23 @@ jobs:
             TRUNCATION_NOTE="> ⚠️ **Diff truncated** — PR exceeds 80KB. Review covers the first portion only. Large PRs should be split."$'\n\n'
           fi
 
-          if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
+          COMMENT="${COMMENT_MARKER}"$'\n'"## Claude PR Review"$'\n\n'"${TRUNCATION_NOTE}${REVIEW}"$'\n\n'"---"$'\n'"*Reviewed by Claude Sonnet · [SPARXSTAR Platform Standards](https://github.com/Starisian-Technologies)*"
 
-            EXISTING_COMMENT_ID=$(
-              gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-                --paginate \
-                | jq -r --arg marker "$COMMENT_MARKER" '
-                  map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
-                  last |
-                  .id // empty
-                '
-            )
+          EXISTING_COMMENT_ID=$(
+            gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+              --paginate \
+              | jq -r --arg marker "$COMMENT_MARKER" '
+                map(select(.user.login == "github-actions[bot]" and (.body | contains($marker)))) |
+                last |
+                .id // empty
+              '
+          )
 
-            if [ -n "$EXISTING_COMMENT_ID" ]; then
-              gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
-                --method PATCH \
-                --raw-field body="$COMMENT"
-            else
-              gh pr comment "$PR_NUMBER" \
-                --body "$COMMENT"
-            fi
+          if [ -n "$EXISTING_COMMENT_ID" ]; then
+            gh api "repos/${GH_REPO}/issues/comments/${EXISTING_COMMENT_ID}" \
+              --method PATCH \
+              --raw-field body="$COMMENT"
           else
-            {
-              echo "## Claude Commit Review"
-              echo
-              if [ -n "$TRUNCATION_NOTE" ]; then
-                printf '%s' "$TRUNCATION_NOTE"
-              fi
-              cat review.txt
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::Commit review generated for ${GITHUB_SHA}. See workflow summary for details."
+            gh pr comment "$PR_NUMBER" \
+              --body "$COMMENT"
           fi

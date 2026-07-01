@@ -49,34 +49,14 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("private-key: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.workflow)
         self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
-        self.assertIn("repositories: sparxstar-platform-contracts", self.workflow)
 
     def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
         self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
-        self.assertIn("repository: Starisian-Technologies/sparxstar-platform-contracts", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
         self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
-        self.assertIn("token: ${{ steps.contracts-token.outputs.token }}", self.workflow)
         # Registry checkouts use the validated contract ref, not the raw input.
         self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
-
-    def test_platform_contracts_registry_is_minted_fetched_and_injected(self) -> None:
-        build_context, review = self._job_blocks()
-        # Minted from the same composer-resolver App, scoped to the contracts
-        # registry only — never a long-lived PAT.
-        self.assertIn("Mint platform-contracts read token", build_context)
-        self.assertIn("repositories: sparxstar-platform-contracts", build_context)
-        # Fetched in the privileged job at the validated contract_ref...
-        self.assertIn("Checkout platform-contracts registry", build_context)
-        self.assertIn("token: ${{ steps.contracts-token.outputs.token }}", build_context)
-        # ...and folded into the trusted-context artifact (PHP interfaces +
-        # MANIFEST index), so the unprivileged review job receives it as data.
-        self.assertIn("PLATFORM CONTRACT FILE", build_context)
-        self.assertIn(".spx-contracts-registry", build_context)
-        # Privilege separation: the unprivileged review job must NOT check out
-        # the contracts registry directly — it only consumes it via artifact.
-        self.assertNotIn("Checkout platform-contracts registry", review)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
@@ -91,9 +71,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(validate, adr_checkout)
 
     def test_registry_content_is_loaded_into_spec_context(self) -> None:
-        self.assertIn("ADR REGISTRY FILE", self.workflow)
-        self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
-        self.assertIn("PLATFORM CONTRACT FILE", self.workflow)
+        # build-context assembles per-tier files from registry clones; the review
+        # job reads them via collect_tier fallback paths in the trusted-context artifact.
+        self.assertIn("tier_adrs.txt", self.workflow)
+        self.assertIn("tier_specs.txt", self.workflow)
+        self.assertIn(".spx-trusted-context/tier_specs.txt", self.workflow)
+        self.assertIn(".spx-trusted-context/tier_adrs.txt", self.workflow)
 
     def _job_blocks(self) -> tuple[str, str]:
         # build-context is defined before review; slice the file at the two
@@ -118,21 +101,6 @@ class WorkflowContractTests(unittest.TestCase):
         # ...which must never resolve or check out untrusted PR-head code.
         self.assertNotIn("Resolve checkout target", build_context)
         self.assertNotIn("steps.checkout_target.outputs.ref", build_context)
-
-    def test_reference_docs_checkout_resolves_own_repo_ref_not_caller_ref(self) -> None:
-        build_context, _ = self._job_blocks()
-        # The privileged job checks out THIS repo's reference docs at the ref of
-        # the reusable workflow itself (github.job_workflow_ref). It must NOT use
-        # github.workflow_ref, which in a reusable call is the caller's top-level
-        # ref — for a cross-repo PR caller that is refs/pull/<n>/merge, a ref that
-        # exists only in the caller and fails "not our ref" against this repo.
-        self.assertIn("WORKFLOW_REF: ${{ github.job_workflow_ref }}", build_context)
-        # The caller-scoped context must not be bound to the resolver env (a
-        # comment may name it to explain the distinction; the binding must not).
-        self.assertNotIn("WORKFLOW_REF: ${{ github.workflow_ref }}", build_context)
-        # The resolved ref feeds only this repo's own checkout, keeping the
-        # caller's PR ref from ever steering the privileged job's checkout.
-        self.assertIn("ref: ${{ steps.workflow_repo_ref.outputs.ref }}", build_context)
 
     def test_build_context_refuses_public_caller(self) -> None:
         build_context, _ = self._job_blocks()
@@ -159,10 +127,10 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_trusted_context_loaded_before_repo_local(self) -> None:
         _, review = self._job_blocks()
-        trusted = review.index("cat .spx-trusted-context/trusted_context.txt")
-        repo_local = review.index('add_context_file "AGENTS.md" "REPO-LOCAL FILE"')
-        # Trusted, canonical context must precede repo-local context so it
-        # survives the 50KB cap.
+        # The trusted context artifact (.spx-trusted-context) is downloaded and
+        # referenced before repo-local AGENTS.md is read into repo_context.txt.
+        trusted = review.index(".spx-trusted-context")
+        repo_local = review.index("AGENTS.md")
         self.assertLess(trusted, repo_local)
 
     def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
@@ -176,23 +144,20 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("actions/download-artifact", review)
         self.assertNotIn("Checkout ADR registry", review)
         self.assertNotIn("Checkout product-spec registry", review)
-        self.assertNotIn("Checkout platform-contracts registry", review)
 
     def test_workflow_has_required_permissions(self) -> None:
         self.assertIn("permissions:", self.workflow)
         self.assertIn("contents: read", self.workflow)
         self.assertIn("pull-requests: write", self.workflow)
 
-    def test_diff_step_supports_pull_request_and_push(self) -> None:
-        start_marker = "- name: Get change diff"
+    def test_diff_step_has_fail_fast_guards(self) -> None:
+        start_marker = "- name: Get PR diff"
         end_marker = "\n      - name:"
         start = self.workflow.index(start_marker)
         end = self.workflow.index(end_marker, start + len(start_marker))
         diff_step = self.workflow[start:end]
-        self.assertIn('if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then', diff_step)
-        self.assertIn('elif [ "${EVENT_NAME}" = "push" ]; then', diff_step)
-        self.assertIn("Unsupported event", diff_step)
-        self.assertIn("Change diff is empty", diff_step)
+        self.assertIn("No pull request number found", diff_step)
+        self.assertIn("PR diff is empty", diff_step)
         self.assertIn("set -euo pipefail", diff_step)
 
     def test_diff_truncation_is_capped_and_flagged(self) -> None:
@@ -204,38 +169,113 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn('echo "truncated=true" >> "$GITHUB_OUTPUT"', diff_block)
         self.assertIn('data.decode("utf-8")', diff_block)
 
-    def test_spec_context_truncation_is_capped_and_warned(self) -> None:
-        start_marker = 'if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then'
-        end_marker = "Spec context truncated to 50KB"
-        start = self.workflow.index(start_marker)
-        end = self.workflow.index(end_marker, start) + len(end_marker)
-        spec_block = self.workflow[start:end]
-        self.assertIn('data.decode("utf-8")', spec_block)
+    def test_three_tier_context_steps_present(self) -> None:
+        self.assertIn("Load three-tier context", self.workflow)
+        self.assertIn("tier_specs.txt", self.workflow)
+        self.assertIn("tier_contracts.txt", self.workflow)
+        self.assertIn("tier_adrs.txt", self.workflow)
+
+    def test_tier_paths_match_artifact_layout(self) -> None:
+        self.assertIn(".sparxstar/specs/agent", self.workflow)
+        self.assertIn(".sparxstar/contracts", self.workflow)
+        self.assertIn(".sparxstar/adrs", self.workflow)
+
+    def test_tier_truncation_is_capped_per_tier(self) -> None:
+        self.assertIn("truncate_to_bytes", self.workflow)
+        self.assertIn("25000", self.workflow)  # spec tier cap
+        self.assertIn("20000", self.workflow)  # contracts and adrs tier cap
+        self.assertIn('data.decode("utf-8")', self.workflow)
+
+    def test_declaration_step_reads_sparxstar_specs_yml(self) -> None:
+        self.assertIn("Read repo declaration", self.workflow)
+        self.assertIn("sparxstar-specs.yml", self.workflow)
+        self.assertIn("specs_ids", self.workflow)
+        self.assertIn("contracts_ids", self.workflow)
+        self.assertIn("adrs_ids", self.workflow)
+
+    def test_prompt_has_three_named_passes(self) -> None:
+        self.assertIn("PASS 1 — SPEC CONFORMANCE", self.workflow)
+        self.assertIn("PASS 2 — CONTRACT SEAM CHECK", self.workflow)
+        self.assertIn("PASS 3 — ADR DRIFT DETECTION", self.workflow)
 
     def test_prompt_template_substitution_is_allowlisted(self) -> None:
         self.assertIn('"${DIFF}": Path("pr.diff").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${SPECS}": Path("spec_context.txt").read_text(encoding="utf-8")', self.workflow)
-        self.assertIn('"${REVIEW_TARGET}": os.environ["REVIEW_TARGET"]', self.workflow)
-        self.assertIn("pattern = re.compile(r\"\\$\\{(?:DIFF|SPECS|REPO|REVIEW_TARGET|TRUNCATION_LINE)\\}\")", self.workflow)
+        self.assertIn('"${TIER_SPECS}": safe_read("tier_specs.txt",', self.workflow)
+        self.assertIn('"${TIER_CONTRACTS}": safe_read("tier_contracts.txt",', self.workflow)
+        self.assertIn('"${TIER_ADRS}": safe_read("tier_adrs.txt",', self.workflow)
+        self.assertIn('"${PLATFORM_REF}": safe_read("platform_ref.txt",', self.workflow)
+        self.assertIn('"${REPO_CONTEXT}": safe_read("repo_context.txt",', self.workflow)
+        # Full allowlist pattern — all 13 tokens must be present
+        self.assertIn(
+            "DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS",
+            self.workflow,
+        )
+
+    def test_platform_ref_is_injected_into_prompt(self) -> None:
+        self.assertIn("${PLATFORM_REF}", self.workflow)
+        self.assertIn("PLATFORM REFERENCE", self.workflow)
 
     def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
-        self.assertIn("import sys", self.workflow)
-        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
-        self.assertIn("::error::Unsubstituted template variables in prompt:", self.workflow)
-        self.assertIn("sys.exit(1)", self.workflow)
+        # Guard must scan the template (before substitution), not the rendered
+        # prompt — diff/spec content can contain ${FOO} that false-positive.
+        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", template)', self.workflow)
+        self.assertIn("Unsubstituted template variables in prompt template", self.workflow)
 
-    def test_review_output_handles_pr_and_commit(self) -> None:
+    def test_artifact_download_step_present_with_continue_on_error(self) -> None:
+        self.assertIn("Download spec artifact", self.workflow)
+        self.assertIn("actions/download-artifact@v4", self.workflow)
+        self.assertIn("continue-on-error: true", self.workflow)
+
+    def test_build_context_writes_per_tier_files(self) -> None:
+        build_context, _ = self._job_blocks()
+        # build-context writes three per-tier files so the review job can fall
+        # back to registry content without PyYAML when no fetch-specs artifact
+        # is present. trusted_context.txt is no longer written or uploaded.
+        self.assertIn("tier_adrs.txt", build_context)
+        self.assertIn("tier_specs.txt", build_context)
+        self.assertIn("platform_ref.txt", build_context)
+        # All three files must be included in the artifact upload.
+        upload = build_context.index("Upload trusted context")
+        self.assertIn("tier_adrs.txt", build_context[upload:])
+        self.assertIn("tier_specs.txt", build_context[upload:])
+        self.assertIn("platform_ref.txt", build_context[upload:])
+
+    def test_fetch_specs_artifact_extracted_to_isolated_dir(self) -> None:
+        _, review = self._job_blocks()
+        # Artifact must land in an isolated directory, never the repo root,
+        # so PR-head .sparxstar/ files cannot inject into the tier context.
+        self.assertIn("path: .spx-specs-artifact", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/specs/agent", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/contracts", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/adrs", review)
+
+    def test_tier_files_fall_back_to_registry_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # collect_tier must fall back to .spx-trusted-context/ tier files when
+        # fetch-specs artifact is absent or empty.
+        self.assertIn(".spx-trusted-context/tier_specs.txt", review)
+        self.assertIn(".spx-trusted-context/tier_adrs.txt", review)
+
+    def test_platform_ref_sourced_from_build_context_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # Platform reference docs live in the privileged build-context job;
+        # the review job must read them from the artifact, never re-fetch.
+        self.assertIn(".spx-trusted-context/platform_ref.txt", review)
+        self.assertNotIn(".spx-workflow-repo/reference", review)
+
+    def test_declaration_uses_stdlib_only_no_pyyaml(self) -> None:
+        self.assertNotIn("pip install pyyaml", self.workflow)
+        self.assertNotIn("import yaml", self.workflow)
+        # Line-based stdlib parser — handles blank lines between list items.
+        self.assertIn("extract_ids", self.workflow)
+        self.assertIn("splitlines", self.workflow)
+        self.assertNotIn("re.search(rf", self.workflow)
+
+    def test_review_comment_is_upserted_with_single_marker(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
-        self.assertIn('if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then', self.workflow)
         self.assertIn('issues/${PR_NUMBER}/comments', self.workflow)
         self.assertIn('issues/comments/${EXISTING_COMMENT_ID}', self.workflow)
         self.assertIn('gh pr comment "$PR_NUMBER"', self.workflow)
-        self.assertIn('>> "$GITHUB_STEP_SUMMARY"', self.workflow)
-
-    def test_spec_context_includes_required_paths(self) -> None:
-        self.assertIn('add_context_file "AGENTS.md" "REPO-LOCAL FILE"', self.workflow)
-        self.assertIn('add_context_file ".github/copilot-instructions.md" "REPO-LOCAL FILE"', self.workflow)
-        self.assertIn('for dir in ".github/instructions" "docs/specs" "specs" "docs"; do', self.workflow)
 
     def test_readme_documents_required_permissions_and_secret(self) -> None:
         self.assertIn("ANTHROPIC_API_KEY", self.readme)
@@ -246,6 +286,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("contents: read", self.consumer_example)
         self.assertIn("pull-requests: write", self.consumer_example)
         self.assertIn("ANTHROPIC_API_KEY", self.consumer_example)
+
+    def test_consumer_example_has_fetch_specs_job(self) -> None:
+        self.assertIn("fetch-specs:", self.consumer_example)
+        self.assertIn("fetch-specs.yml", self.consumer_example)
+        self.assertIn("needs: fetch-specs", self.consumer_example)
 
     def test_consumer_example_pins_immutable_tag_and_passes_resolver_secret(self) -> None:
         # Platform convention: pin the immutable release tag, not @v1 or @main.

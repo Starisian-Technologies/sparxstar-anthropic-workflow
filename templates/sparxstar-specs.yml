@@ -1,0 +1,39 @@
+# sparxstar-specs.yml — place at your repo root.
+# Declares which specs, contracts, and ADRs govern this repo.
+# fetch-specs.yml reads this file and produces the artifact the review job consumes.
+# Scope lives here, with the repo that is party to it — not in the workflow.
+
+product: your-product-slug
+
+# Tier 1 — spec conformance.
+# The repo spec: what this repo is specified to do.
+# Review pass: does the diff match the spec's REQ-*, AC-*, OQ-* requirements?
+specs:
+  - id: your-product-slug
+    agent_ref: main                          # always main — always fresh
+    contract_ref: your-product-slug-v1.0.0  # pinned adopted version; bump deliberately
+    destination: .sparxstar/specs/agent/your-product-slug.md
+
+# Tier 2 — contract seam check.
+# Cross-repo contracts this repo is party to.
+# Review pass: does the diff honour what this repo owes across boundaries?
+# Paths are relative to sparxstar-platform-contracts repo root.
+# Use agent_ref: main until you have a pinned audited version.
+contracts:
+  - id: IAMC/YourProduct
+    agent_ref: main
+    destination: .sparxstar/contracts/IAMC-YourProduct.md
+
+# Tier 3 — ADR drift detection.
+# Architecture Decision Records that govern this repo.
+# Review pass: does the diff silently reverse a settled decision?
+# IDs are from sparxstar-architecture-governance-registry standards/decisions/.
+adrs:
+  - id: ADR-002   # Three trust zones
+    agent_ref: main
+    destination: .sparxstar/adrs/ADR-002.md
+  - id: ADR-012   # Contributor identity authority — Helios only
+    agent_ref: main
+    destination: .sparxstar/adrs/ADR-012.md
+
+include_platform_docs: false
