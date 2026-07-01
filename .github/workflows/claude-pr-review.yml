@@ -210,37 +210,9 @@ jobs:
       - name: Assemble trusted context
         run: |
           set -euo pipefail
-          : > trusted_context.txt
 
-          # Authoritative contracts from the private registries, pinned to the
-          # requested contract_ref, plus the platform reference snapshot. The
-          # consuming job appends repo-local context and applies the size cap.
-          if [ -d ".spx-adr-registry" ]; then
-            while IFS= read -r f; do
-              printf '%s\n' "--- ADR REGISTRY FILE: ${f#.spx-adr-registry/} ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
-            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
-          fi
-
-          if [ -d ".spx-spec-registry" ]; then
-            while IFS= read -r f; do
-              printf '%s\n' "--- PRODUCT SPEC REGISTRY FILE: ${f#.spx-spec-registry/} ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
-            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
-          fi
-
-          for f in .spx-workflow-repo/reference/*.md; do
-            if [ -f "$f" ]; then
-              printf '%s\n' "--- PLATFORM REFERENCE FILE: $f ---" >> trusted_context.txt
-              cat "$f" >> trusted_context.txt
-              printf '\n\n' >> trusted_context.txt
-            fi
-          done
-
-          # Per-tier files for the three-pass review model — written from the same
-          # registry clones, in this privileged job only. The review job uses these
+          # Per-tier files for the three-pass review model. Written from the
+          # registry clones in this privileged job; the review job uses these
           # as fallback when no fetch-specs.yml artifact is present.
           : > tier_adrs.txt
           if [ -d ".spx-adr-registry" ]; then
@@ -274,7 +246,6 @@ jobs:
         with:
           name: spx-trusted-context
           path: |
-            trusted_context.txt
             tier_adrs.txt
             tier_specs.txt
             platform_ref.txt
@@ -383,6 +354,9 @@ PY
           name: spx-trusted-context
           path: .spx-trusted-context
 
+      - name: Clean spec artifact directory
+        run: rm -rf .spx-specs-artifact
+
       - name: Download spec artifact
         uses: actions/download-artifact@v4
         with:
@@ -394,8 +368,20 @@ PY
 
       - name: Read repo declaration
         id: declaration
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+
+          # Read sparxstar-specs.yml from the base commit, not the PR-head working
+          # tree, so a malicious PR cannot expand its own review scope.
+          SPECS_FILE="sparxstar-specs.yml"
+          if [ -n "${BASE_SHA:-}" ]; then
+            if git show "${BASE_SHA}:sparxstar-specs.yml" > .spx-base-specs.yml 2>/dev/null; then
+              SPECS_FILE=".spx-base-specs.yml"
+            fi
+          fi
+          export SPECS_FILE
 
           python3 - <<'PY'
 import re
@@ -404,8 +390,9 @@ import os
 from pathlib import Path
 
 out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+specs_file = os.environ.get("SPECS_FILE", "sparxstar-specs.yml")
 
-if not Path("sparxstar-specs.yml").exists():
+if not Path(specs_file).exists():
     with open(out_path, "a") as f:
         f.write("specs_ids=(none declared)\n")
         f.write("contracts_ids=(none declared)\n")
@@ -414,7 +401,7 @@ if not Path("sparxstar-specs.yml").exists():
     sys.exit(0)
 
 try:
-    text = Path("sparxstar-specs.yml").read_text(encoding="utf-8")
+    text = Path(specs_file).read_text(encoding="utf-8")
 
     def extract_ids(section, text):
         ids = []

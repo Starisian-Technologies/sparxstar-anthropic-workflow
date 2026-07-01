@@ -71,8 +71,12 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertLess(validate, adr_checkout)
 
     def test_registry_content_is_loaded_into_spec_context(self) -> None:
-        self.assertIn("ADR REGISTRY FILE", self.workflow)
-        self.assertIn("PRODUCT SPEC REGISTRY FILE", self.workflow)
+        # build-context assembles per-tier files from registry clones; the review
+        # job reads them via collect_tier fallback paths in the trusted-context artifact.
+        self.assertIn("tier_adrs.txt", self.workflow)
+        self.assertIn("tier_specs.txt", self.workflow)
+        self.assertIn(".spx-trusted-context/tier_specs.txt", self.workflow)
+        self.assertIn(".spx-trusted-context/tier_adrs.txt", self.workflow)
 
     def _job_blocks(self) -> tuple[str, str]:
         # build-context is defined before review; slice the file at the two
