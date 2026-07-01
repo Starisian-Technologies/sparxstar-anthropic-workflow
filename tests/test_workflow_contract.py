@@ -228,12 +228,13 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_build_context_writes_per_tier_files(self) -> None:
         build_context, _ = self._job_blocks()
-        # build-context must write per-tier files alongside trusted_context.txt
-        # so the review job can fall back to registry content without PyYAML.
+        # build-context writes three per-tier files so the review job can fall
+        # back to registry content without PyYAML when no fetch-specs artifact
+        # is present. trusted_context.txt is no longer written or uploaded.
         self.assertIn("tier_adrs.txt", build_context)
         self.assertIn("tier_specs.txt", build_context)
         self.assertIn("platform_ref.txt", build_context)
-        # All four files must be included in the artifact upload.
+        # All three files must be included in the artifact upload.
         upload = build_context.index("Upload trusted context")
         self.assertIn("tier_adrs.txt", build_context[upload:])
         self.assertIn("tier_specs.txt", build_context[upload:])

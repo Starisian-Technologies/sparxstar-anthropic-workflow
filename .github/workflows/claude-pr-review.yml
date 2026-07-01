@@ -383,9 +383,12 @@ PY
         run: |
           set -euo pipefail
 
-          # Read sparxstar-specs.yml from the base commit, not the PR-head working
-          # tree, so a malicious PR cannot expand its own review scope.
-          SPECS_FILE="sparxstar-specs.yml"
+          # Read sparxstar-specs.yml from the base commit only. Never fall back
+          # to the PR-head working tree — on fork PRs BASE_SHA may not exist in
+          # the fork's history, but silently reading the PR-head file would let
+          # a malicious PR expand its own review scope. Treat any failure as
+          # "no declaration" instead.
+          SPECS_FILE=""
           if [ -n "${BASE_SHA:-}" ]; then
             if git show "${BASE_SHA}:sparxstar-specs.yml" > .spx-base-specs.yml 2>/dev/null; then
               SPECS_FILE=".spx-base-specs.yml"
@@ -400,9 +403,9 @@ import os
 from pathlib import Path
 
 out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
-specs_file = os.environ.get("SPECS_FILE", "sparxstar-specs.yml")
+specs_file = os.environ.get("SPECS_FILE", "")
 
-if not Path(specs_file).exists():
+if not specs_file or not Path(specs_file).exists():
     with open(out_path, "a") as f:
         f.write("specs_ids=(none declared)\n")
         f.write("contracts_ids=(none declared)\n")
@@ -421,10 +424,15 @@ try:
                 in_section = True
                 continue
             if in_section:
-                # A non-blank, non-indented line starts a new top-level key.
-                if line and not line[0].isspace():
+                stripped = line.strip()
+                # Skip blank lines and YAML comments — they don't end a section.
+                if not stripped or stripped.startswith('#'):
+                    continue
+                # A non-indented, non-comment line that isn't a list item
+                # starts a new top-level key — end of this section.
+                if line and not line[0].isspace() and not line.lstrip().startswith('-'):
                     break
-                m = re.match(r'^\s+-\s+id:\s+(\S+)', line)
+                m = re.match(r'^-\s+id:\s+(\S+)', stripped)
                 if m:
                     ids.append(m.group(1))
         return ids
