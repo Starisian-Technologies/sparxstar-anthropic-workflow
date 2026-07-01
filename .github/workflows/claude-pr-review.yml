@@ -348,14 +348,24 @@ PY
             echo "truncated=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Clean artifact directories
+        run: |
+          set -euo pipefail
+          # Remove before download so PR-head cannot pre-plant symlinks or files
+          # that would be followed/merged into the extracted artifact content.
+          for dir in .spx-trusted-context .spx-specs-artifact; do
+            if [ -L "$dir" ]; then
+              echo "::error::$dir is a symlink — aborting to prevent path traversal."
+              exit 1
+            fi
+            rm -rf "$dir"
+          done
+
       - name: Download trusted context
         uses: actions/download-artifact@v4
         with:
           name: spx-trusted-context
           path: .spx-trusted-context
-
-      - name: Clean spec artifact directory
-        run: rm -rf .spx-specs-artifact
 
       - name: Download spec artifact
         uses: actions/download-artifact@v4
@@ -685,11 +695,16 @@ PROMPT_EOF
               r"\$\{(?:DIFF|TIER_SPECS|TIER_CONTRACTS|TIER_ADRS|PLATFORM_REF|REPO_CONTEXT|REPO|PR_TITLE|PR_NUMBER|TRUNCATION_LINE|SPECS_IDS|CONTRACTS_IDS|ADRS_IDS)\}"
           )
           template = Path("prompt_template.txt").read_text(encoding="utf-8")
-          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
-          leftover = re.findall(r"\$\{[A-Z_]+\}", prompt)
+          # Validate against the template, not the rendered prompt — diff/spec
+          # content can contain ${FOO} patterns that would false-positive on
+          # the rendered string (e.g. GitHub Actions expressions, shell vars).
+          leftover = re.findall(r"\$\{[A-Z_]+\}", template)
+          # Strip known tokens — only unrecognised placeholders are errors.
+          leftover = [t for t in leftover if t not in token_values]
           if leftover:
-              print(f"::error::Unsubstituted template variables in prompt: {leftover}", file=sys.stderr)
+              print(f"::error::Unsubstituted template variables in prompt template: {leftover}", file=sys.stderr)
               sys.exit(1)
+          prompt = pattern.sub(lambda m: token_values[m.group(0)], template)
           Path("prompt.txt").write_text(prompt, encoding="utf-8")
 PY
 

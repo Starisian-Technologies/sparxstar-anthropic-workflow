@@ -216,8 +216,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("PLATFORM REFERENCE", self.workflow)
 
     def test_prompt_substitution_validates_no_leftover_tokens(self) -> None:
-        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", prompt)', self.workflow)
-        self.assertIn("Unsubstituted template variables in prompt", self.workflow)
+        # Guard must scan the template (before substitution), not the rendered
+        # prompt — diff/spec content can contain ${FOO} that false-positive.
+        self.assertIn('leftover = re.findall(r"\\$\\{[A-Z_]+\\}", template)', self.workflow)
+        self.assertIn("Unsubstituted template variables in prompt template", self.workflow)
 
     def test_artifact_download_step_present_with_continue_on_error(self) -> None:
         self.assertIn("Download spec artifact", self.workflow)
