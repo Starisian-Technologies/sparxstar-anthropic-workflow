@@ -7,8 +7,9 @@ on:
         description: >
           Name of the artifact produced by fetch-specs.yml (sparxstar-product-specification-registry).
           The artifact must contain .sparxstar/specs/, .sparxstar/contracts/, and/or .sparxstar/adrs/
-          directories. Omit only if not using the fetch workflow — tiers will be empty and review
-          will rely on platform rules and repo context only.
+          directories. When omitted or when the artifact download fails, specs and ADR tiers fall
+          back to registry content assembled by the build-context job; the contracts tier is empty
+          without the fetch-specs producer.
         required: false
         default: 'sparxstar-specs'
         type: string
@@ -387,7 +388,9 @@ PY
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.specs-artifact }}
-          path: .
+          # Extract to an isolated directory, not the repo root, so PR-head code
+          # cannot pre-populate .sparxstar/ to inject content into tier context.
+          path: .spx-specs-artifact
         continue-on-error: true
 
       - name: Read repo declaration
@@ -415,10 +418,20 @@ try:
     text = Path("sparxstar-specs.yml").read_text(encoding="utf-8")
 
     def extract_ids(section, text):
-        m = re.search(rf'^{section}:\s*\n((?:[ \t].*\n?)*)', text, re.MULTILINE)
-        if not m:
-            return []
-        return re.findall(r'^\s+-\s+id:\s+(\S+)', m.group(1), re.MULTILINE)
+        ids = []
+        in_section = False
+        for line in text.splitlines():
+            if re.match(rf'^{section}:\s*$', line):
+                in_section = True
+                continue
+            if in_section:
+                # A non-blank, non-indented line starts a new top-level key.
+                if line and not line[0].isspace():
+                    break
+                m = re.match(r'^\s+-\s+id:\s+(\S+)', line)
+                if m:
+                    ids.append(m.group(1))
+        return ids
 
     specs = extract_ids("specs", text)
     contracts = extract_ids("contracts", text)
@@ -493,20 +506,20 @@ PY
           }
 
           # Tier 1 — spec conformance: what the repo is specified to do.
-          # Primary: .sparxstar/specs/agent/ (from fetch-specs.yml).
+          # Primary: fetch-specs artifact (isolated dir, never the PR checkout).
           # Fallback: tier_specs.txt assembled in build-context from spec registry clone.
-          collect_tier ".sparxstar/specs/agent" "tier_specs.txt" 25000 "Spec" \
+          collect_tier ".spx-specs-artifact/.sparxstar/specs/agent" "tier_specs.txt" 25000 "Spec" \
             ".spx-trusted-context/tier_specs.txt"
 
           # Tier 2 — contract seam: what the repo owes across boundaries.
-          # Primary: .sparxstar/contracts/ (from fetch-specs.yml, extended).
+          # Primary: fetch-specs artifact (isolated dir).
           # No fallback — contracts require the fetch-specs producer.
-          collect_tier ".sparxstar/contracts" "tier_contracts.txt" 20000 "Contracts"
+          collect_tier ".spx-specs-artifact/.sparxstar/contracts" "tier_contracts.txt" 20000 "Contracts"
 
           # Tier 3 — ADR drift: settled architectural decisions.
-          # Primary: .sparxstar/adrs/ (from fetch-specs.yml, extended).
+          # Primary: fetch-specs artifact (isolated dir).
           # Fallback: tier_adrs.txt assembled in build-context from ADR registry clone.
-          collect_tier ".sparxstar/adrs" "tier_adrs.txt" 20000 "ADRs" \
+          collect_tier ".spx-specs-artifact/.sparxstar/adrs" "tier_adrs.txt" 20000 "ADRs" \
             ".spx-trusted-context/tier_adrs.txt"
 
           # Platform reference — from build-context artifact only (never in .sparxstar/).

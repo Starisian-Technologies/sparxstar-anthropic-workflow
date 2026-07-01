@@ -233,10 +233,19 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("tier_specs.txt", build_context[upload:])
         self.assertIn("platform_ref.txt", build_context[upload:])
 
+    def test_fetch_specs_artifact_extracted_to_isolated_dir(self) -> None:
+        _, review = self._job_blocks()
+        # Artifact must land in an isolated directory, never the repo root,
+        # so PR-head .sparxstar/ files cannot inject into the tier context.
+        self.assertIn("path: .spx-specs-artifact", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/specs/agent", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/contracts", review)
+        self.assertIn(".spx-specs-artifact/.sparxstar/adrs", review)
+
     def test_tier_files_fall_back_to_registry_artifact(self) -> None:
         _, review = self._job_blocks()
         # collect_tier must fall back to .spx-trusted-context/ tier files when
-        # .sparxstar/ dirs are empty (i.e. fetch-specs.yml did not run).
+        # fetch-specs artifact is absent or empty.
         self.assertIn(".spx-trusted-context/tier_specs.txt", review)
         self.assertIn(".spx-trusted-context/tier_adrs.txt", review)
 
@@ -250,9 +259,10 @@ class WorkflowContractTests(unittest.TestCase):
     def test_declaration_uses_stdlib_only_no_pyyaml(self) -> None:
         self.assertNotIn("pip install pyyaml", self.workflow)
         self.assertNotIn("import yaml", self.workflow)
-        # stdlib regex parser must be present
+        # Line-based stdlib parser — handles blank lines between list items.
         self.assertIn("extract_ids", self.workflow)
-        self.assertIn("re.search", self.workflow)
+        self.assertIn("splitlines", self.workflow)
+        self.assertNotIn("re.search(rf", self.workflow)
 
     def test_review_comment_is_upserted_with_single_marker(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
