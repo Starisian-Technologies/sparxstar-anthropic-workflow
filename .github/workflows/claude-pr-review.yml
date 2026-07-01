@@ -238,11 +238,45 @@ jobs:
             fi
           done
 
+          # Per-tier files for the three-pass review model — written from the same
+          # registry clones, in this privileged job only. The review job uses these
+          # as fallback when no fetch-specs.yml artifact is present.
+          : > tier_adrs.txt
+          if [ -d ".spx-adr-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- ADR: ${f#.spx-adr-registry/} ---" >> tier_adrs.txt
+              cat "$f" >> tier_adrs.txt
+              printf '\n\n' >> tier_adrs.txt
+            done < <(find .spx-adr-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          : > tier_specs.txt
+          if [ -d ".spx-spec-registry" ]; then
+            while IFS= read -r f; do
+              printf '%s\n' "--- SPEC: ${f#.spx-spec-registry/} ---" >> tier_specs.txt
+              cat "$f" >> tier_specs.txt
+              printf '\n\n' >> tier_specs.txt
+            done < <(find .spx-spec-registry -type f -name '*.md' -not -path '*/.git/*' | sort)
+          fi
+
+          : > platform_ref.txt
+          for f in .spx-workflow-repo/reference/*.md; do
+            if [ -f "$f" ]; then
+              printf '%s\n' "--- PLATFORM REFERENCE: $(basename "$f") ---" >> platform_ref.txt
+              cat "$f" >> platform_ref.txt
+              printf '\n\n' >> platform_ref.txt
+            fi
+          done
+
       - name: Upload trusted context
         uses: actions/upload-artifact@v4
         with:
           name: spx-trusted-context
-          path: trusted_context.txt
+          path: |
+            trusted_context.txt
+            tier_adrs.txt
+            tier_specs.txt
+            platform_ref.txt
           retention-days: 1
           if-no-files-found: error
 
@@ -360,91 +394,48 @@ PY
         id: declaration
         run: |
           set -euo pipefail
-          pip install pyyaml -q
-
-          : > spec_context.txt
-
-          # Authoritative ADRs, product specs, and platform reference docs were
-          # assembled in the privileged build-context job and arrive purely as
-          # an artifact (never re-fetched here, where untrusted code lives).
-          # Written FIRST so the canonical contracts survive the size cap; the
-          # repo-local (untrusted PR) context below is appended and is what gets
-          # truncated if anything does.
-          if [ -f ".spx-trusted-context/trusted_context.txt" ]; then
-            cat .spx-trusted-context/trusted_context.txt >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          fi
-
-          if [ -f "AGENTS.md" ]; then
-            printf '%s\n' "--- REPO-LOCAL FILE: AGENTS.md ---" >> spec_context.txt
-            cat AGENTS.md >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          fi
-
-          if [ -f ".github/copilot-instructions.md" ]; then
-            printf '%s\n' "--- REPO-LOCAL FILE: .github/copilot-instructions.md ---" >> spec_context.txt
-            cat .github/copilot-instructions.md >> spec_context.txt
-            printf '\n\n' >> spec_context.txt
-          fi
-
-          for f in *.md docs/*.md specs/*.md; do
-            if [ -f "$f" ] && [ "$f" != "README.md" ] && [ "$f" != "CHANGELOG.md" ] && [ "$f" != "AGENTS.md" ]; then
-              printf '%s\n' "--- REPO-LOCAL FILE: $f ---" >> spec_context.txt
-              cat "$f" >> spec_context.txt
-              printf '\n\n' >> spec_context.txt
-            fi
-          done
-
-          if [ "$(wc -c < spec_context.txt)" -gt 50000 ]; then
-            python3 - <<'PY'
-from pathlib import Path
-path = Path("spec_context.txt")
-data = path.read_bytes()[:50000]
-while data:
-    try:
-        data.decode("utf-8")
-        break
-    except UnicodeDecodeError:
-        data = data[:-1]
-path.write_bytes(data)
-PY
-            echo "::warning::Spec context truncated to 50KB. Authoritative ADR/spec/reference context is placed first and preserved; trailing repo-local context may be truncated."
-          fi
 
           python3 - <<'PY'
-          import os
-          import sys
-          from pathlib import Path
+import re
+import sys
+import os
+from pathlib import Path
 
-          out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
 
-          if not Path("sparxstar-specs.yml").exists():
-              with open(out_path, "a") as f:
-                  f.write("specs_ids=(none declared)\n")
-                  f.write("contracts_ids=(none declared)\n")
-                  f.write("adrs_ids=(none declared)\n")
-                  f.write("has_declaration=false\n")
-              sys.exit(0)
+if not Path("sparxstar-specs.yml").exists():
+    with open(out_path, "a") as f:
+        f.write("specs_ids=(none declared)\n")
+        f.write("contracts_ids=(none declared)\n")
+        f.write("adrs_ids=(none declared)\n")
+        f.write("has_declaration=false\n")
+    sys.exit(0)
 
-          try:
-              import yaml
-              with open("sparxstar-specs.yml") as f:
-                  decl = yaml.safe_load(f)
-              specs = [str(s.get("id", "")) for s in (decl.get("specs") or [])]
-              contracts = [str(c.get("id", "")) for c in (decl.get("contracts") or [])]
-              adrs = [str(a.get("id", "")) for a in (decl.get("adrs") or [])]
-              with open(out_path, "a") as f:
-                  f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
-                  f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
-                  f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
-                  f.write("has_declaration=true\n")
-          except Exception as e:
-              print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
-              with open(out_path, "a") as f:
-                  f.write("specs_ids=(parse error)\n")
-                  f.write("contracts_ids=(parse error)\n")
-                  f.write("adrs_ids=(parse error)\n")
-                  f.write("has_declaration=false\n")
+try:
+    text = Path("sparxstar-specs.yml").read_text(encoding="utf-8")
+
+    def extract_ids(section, text):
+        m = re.search(rf'^{section}:\s*\n((?:[ \t].*\n?)*)', text, re.MULTILINE)
+        if not m:
+            return []
+        return re.findall(r'^\s+-\s+id:\s+(\S+)', m.group(1), re.MULTILINE)
+
+    specs = extract_ids("specs", text)
+    contracts = extract_ids("contracts", text)
+    adrs = extract_ids("adrs", text)
+
+    with open(out_path, "a") as f:
+        f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
+        f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
+        f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
+        f.write("has_declaration=true\n")
+except Exception as e:
+    print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
+    with open(out_path, "a") as f:
+        f.write("specs_ids=(parse error)\n")
+        f.write("contracts_ids=(parse error)\n")
+        f.write("adrs_ids=(parse error)\n")
+        f.write("has_declaration=false\n")
 PY
 
       - name: Load three-tier context
@@ -479,47 +470,53 @@ PY
             local output="$2"
             local max_bytes="$3"
             local label="$4"
+            local fallback="${5:-}"
 
             : > "$output"
 
-            if [ ! -d "$dir" ] || [ -z "$(find "$dir" -name '*.md' -type f 2>/dev/null)" ]; then
-              printf '# No %s content in artifact — tier not loaded.\n' "$label" > "$output"
+            # Prefer .sparxstar/ dirs (from fetch-specs.yml producer) if populated.
+            if [ -d "$dir" ] && [ -n "$(find "$dir" -name '*.md' -type f 2>/dev/null)" ]; then
+              find "$dir" -type f -name '*.md' | sort | while IFS= read -r f; do
+                printf '--- %s ---\n' "$f"
+                cat "$f"
+                printf '\n\n'
+              done >> "$output"
+            elif [ -n "$fallback" ] && [ -f "$fallback" ] && [ -s "$fallback" ]; then
+              # Fall back to registry-sourced tier file from build-context artifact.
+              cat "$fallback" >> "$output"
+            else
+              printf '# No %s content available — tier not loaded.\n' "$label" > "$output"
               return
             fi
-
-            find "$dir" -type f -name '*.md' | sort | while IFS= read -r f; do
-              printf '--- %s ---\n' "$f"
-              cat "$f"
-              printf '\n\n'
-            done >> "$output"
 
             truncate_to_bytes "$output" "$max_bytes" "$label"
           }
 
-          # Tier 1 — spec conformance: what the repo is specified to do
-          # fetch-specs.yml writes agent_ref content to .sparxstar/specs/agent/
-          collect_tier ".sparxstar/specs/agent" "tier_specs.txt" 25000 "Spec"
+          # Tier 1 — spec conformance: what the repo is specified to do.
+          # Primary: .sparxstar/specs/agent/ (from fetch-specs.yml).
+          # Fallback: tier_specs.txt assembled in build-context from spec registry clone.
+          collect_tier ".sparxstar/specs/agent" "tier_specs.txt" 25000 "Spec" \
+            ".spx-trusted-context/tier_specs.txt"
 
-          # Tier 2 — contract seam: what the repo owes across boundaries
-          # fetch-specs.yml (extended) writes to .sparxstar/contracts/
+          # Tier 2 — contract seam: what the repo owes across boundaries.
+          # Primary: .sparxstar/contracts/ (from fetch-specs.yml, extended).
+          # No fallback — contracts require the fetch-specs producer.
           collect_tier ".sparxstar/contracts" "tier_contracts.txt" 20000 "Contracts"
 
-          # Tier 3 — ADR drift: settled architectural decisions
-          # fetch-specs.yml (extended) writes to .sparxstar/adrs/
-          collect_tier ".sparxstar/adrs" "tier_adrs.txt" 20000 "ADRs"
+          # Tier 3 — ADR drift: settled architectural decisions.
+          # Primary: .sparxstar/adrs/ (from fetch-specs.yml, extended).
+          # Fallback: tier_adrs.txt assembled in build-context from ADR registry clone.
+          collect_tier ".sparxstar/adrs" "tier_adrs.txt" 20000 "ADRs" \
+            ".spx-trusted-context/tier_adrs.txt"
 
-          # Platform reference docs (from this workflow repo)
+          # Platform reference — from build-context artifact only (never in .sparxstar/).
           : > platform_ref.txt
-          for f in .spx-workflow-repo/reference/*.md; do
-            if [ -f "$f" ]; then
-              printf '--- PLATFORM REFERENCE: %s ---\n' "$f" >> platform_ref.txt
-              cat "$f" >> platform_ref.txt
-              printf '\n\n' >> platform_ref.txt
-            fi
-          done
+          if [ -f ".spx-trusted-context/platform_ref.txt" ] && [ -s ".spx-trusted-context/platform_ref.txt" ]; then
+            cat ".spx-trusted-context/platform_ref.txt" >> platform_ref.txt
+          fi
           truncate_to_bytes "platform_ref.txt" 15000 "Platform reference"
 
-          # Repo-level agent context (AGENTS.md, copilot instructions)
+          # Repo-level agent context (AGENTS.md, copilot instructions).
           : > repo_context.txt
           if [ -f "AGENTS.md" ]; then
             cat AGENTS.md >> repo_context.txt

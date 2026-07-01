@@ -123,10 +123,10 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_trusted_context_loaded_before_repo_local(self) -> None:
         _, review = self._job_blocks()
-        trusted = review.index("cat .spx-trusted-context/trusted_context.txt")
-        repo_local = review.index("REPO-LOCAL FILE: AGENTS.md")
-        # Trusted, canonical context must precede repo-local context so it
-        # survives the 50KB cap.
+        # The trusted context artifact (.spx-trusted-context) is downloaded and
+        # referenced before repo-local AGENTS.md is read into repo_context.txt.
+        trusted = review.index(".spx-trusted-context")
+        repo_local = review.index("AGENTS.md")
         self.assertLess(trusted, repo_local)
 
     def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
@@ -219,6 +219,40 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Download spec artifact", self.workflow)
         self.assertIn("actions/download-artifact@v4", self.workflow)
         self.assertIn("continue-on-error: true", self.workflow)
+
+    def test_build_context_writes_per_tier_files(self) -> None:
+        build_context, _ = self._job_blocks()
+        # build-context must write per-tier files alongside trusted_context.txt
+        # so the review job can fall back to registry content without PyYAML.
+        self.assertIn("tier_adrs.txt", build_context)
+        self.assertIn("tier_specs.txt", build_context)
+        self.assertIn("platform_ref.txt", build_context)
+        # All four files must be included in the artifact upload.
+        upload = build_context.index("Upload trusted context")
+        self.assertIn("tier_adrs.txt", build_context[upload:])
+        self.assertIn("tier_specs.txt", build_context[upload:])
+        self.assertIn("platform_ref.txt", build_context[upload:])
+
+    def test_tier_files_fall_back_to_registry_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # collect_tier must fall back to .spx-trusted-context/ tier files when
+        # .sparxstar/ dirs are empty (i.e. fetch-specs.yml did not run).
+        self.assertIn(".spx-trusted-context/tier_specs.txt", review)
+        self.assertIn(".spx-trusted-context/tier_adrs.txt", review)
+
+    def test_platform_ref_sourced_from_build_context_artifact(self) -> None:
+        _, review = self._job_blocks()
+        # Platform reference docs live in the privileged build-context job;
+        # the review job must read them from the artifact, never re-fetch.
+        self.assertIn(".spx-trusted-context/platform_ref.txt", review)
+        self.assertNotIn(".spx-workflow-repo/reference", review)
+
+    def test_declaration_uses_stdlib_only_no_pyyaml(self) -> None:
+        self.assertNotIn("pip install pyyaml", self.workflow)
+        self.assertNotIn("import yaml", self.workflow)
+        # stdlib regex parser must be present
+        self.assertIn("extract_ids", self.workflow)
+        self.assertIn("re.search", self.workflow)
 
     def test_review_comment_is_upserted_with_single_marker(self) -> None:
         self.assertIn('COMMENT_MARKER="<!-- claude-pr-review-comment -->"', self.workflow)
