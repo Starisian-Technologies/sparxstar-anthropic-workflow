@@ -273,6 +273,7 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
           GITHUB_SHA_SAFE: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -280,13 +281,22 @@ jobs:
           REF="${PR_HEAD_SHA:-$GITHUB_SHA_SAFE}"
 
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            MERGE_REF="refs/pull/${PR_NUMBER}/merge"
-            if git ls-remote --exit-code --refs \
-              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY_SAFE}.git" \
-              "${MERGE_REF}" > /dev/null 2>&1; then
-              REPOSITORY="$GITHUB_REPOSITORY_SAFE"
-              REF="$MERGE_REF"
+            MERGE_COMMIT_SHA=""
+            MERGE_REF_CHECK_STDERR="$(mktemp)"
+            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")"; then
+              if [ -n "$MERGE_COMMIT_SHA" ]; then
+                REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+                REF="$MERGE_COMMIT_SHA"
+              fi
+            else
+              echo "::warning::Unable to query PR merge commit; falling back to PR head SHA."
+              if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
+                echo "::group::gh pr view stderr"
+                cat "$MERGE_REF_CHECK_STDERR"
+                echo "::endgroup::"
+              fi
             fi
+            rm -f "$MERGE_REF_CHECK_STDERR"
           fi
 
           echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
