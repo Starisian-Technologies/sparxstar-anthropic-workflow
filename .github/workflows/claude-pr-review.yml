@@ -273,15 +273,24 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
           GITHUB_SHA_SAFE: ${{ github.sha }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          REPOSITORY="${PR_HEAD_REPO_FULL_NAME:-$GITHUB_REPOSITORY_SAFE}"
+          REF="${PR_HEAD_SHA:-$GITHUB_SHA_SAFE}"
+
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            echo "repository=$PR_HEAD_REPO_FULL_NAME" >> "$GITHUB_OUTPUT"
-            echo "ref=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "repository=$GITHUB_REPOSITORY_SAFE" >> "$GITHUB_OUTPUT"
-            echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
+            MERGE_REF="refs/pull/${PR_NUMBER}/merge"
+            if git ls-remote --exit-code --refs \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY_SAFE}.git" \
+              "${MERGE_REF}" > /dev/null 2>&1; then
+              REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+              REF="$MERGE_REF"
+            fi
           fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       # Untrusted PR-head code. This job only ever READS these files (the diff
       # and markdown context); it never builds, installs, or executes anything
