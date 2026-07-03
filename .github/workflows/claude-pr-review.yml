@@ -273,15 +273,34 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
           GITHUB_SHA_SAFE: ${{ github.sha }}
+          GH_REPO: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          REPOSITORY="${PR_HEAD_REPO_FULL_NAME:-$GITHUB_REPOSITORY_SAFE}"
+          REF="${PR_HEAD_SHA:-$GITHUB_SHA_SAFE}"
+
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
-            echo "repository=$PR_HEAD_REPO_FULL_NAME" >> "$GITHUB_OUTPUT"
-            echo "ref=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "repository=$GITHUB_REPOSITORY_SAFE" >> "$GITHUB_OUTPUT"
-            echo "ref=$GITHUB_SHA_SAFE" >> "$GITHUB_OUTPUT"
+            MERGE_COMMIT_SHA=""
+            MERGE_REF_CHECK_STDERR="$(mktemp)"
+            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")"; then
+              if [ -n "$MERGE_COMMIT_SHA" ]; then
+                REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+                REF="$MERGE_COMMIT_SHA"
+              fi
+            else
+              echo "::warning::Unable to query PR merge commit; falling back to PR head SHA."
+              if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
+                echo "::group::gh pr view stderr"
+                cat "$MERGE_REF_CHECK_STDERR"
+                echo "::endgroup::"
+              fi
+            fi
+            rm -f "$MERGE_REF_CHECK_STDERR"
           fi
+
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
       # Untrusted PR-head code. This job only ever READS these files (the diff
       # and markdown context); it never builds, installs, or executes anything
