@@ -269,12 +269,10 @@ jobs:
         id: checkout_target
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
           GITHUB_SHA_SAFE: ${{ github.sha }}
           GH_REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           REPOSITORY="$GITHUB_REPOSITORY_SAFE"
