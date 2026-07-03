@@ -82,30 +82,6 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve workflow repository ref
-        id: workflow_repo_ref
-        env:
-          WORKFLOW_REF: ${{ github.job_workflow_ref }}
-        run: |
-          set -euo pipefail
-          WORKFLOW_REF="${WORKFLOW_REF:-}"
-          RESOLVED_REF="${WORKFLOW_REF#*@}"
-
-          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
-            RESOLVED_REF="main"
-          fi
-
-          case "$RESOLVED_REF" in
-            refs/heads/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
-              ;;
-            refs/tags/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
-              ;;
-          esac
-
-          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
-
       # The ADR and product-spec registries are private; the caller's
       # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
       # read tokens from the composer-resolver GitHub App — one scoped to
@@ -178,11 +154,55 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
+      - name: Resolve contract ref SHAs
+        id: contract-shas
+        env:
+          CONTRACT_REF: ${{ steps.contract.outputs.ref }}
+          ADR_TOKEN: ${{ steps.adr-token.outputs.token }}
+          SPEC_TOKEN: ${{ steps.spec-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          # Resolve the validated contract_ref to immutable commit SHAs via the
+          # GitHub API. Using API-returned SHAs (rather than the caller-supplied
+          # ref name) in the checkout steps breaks the taint chain from
+          # inputs.contract_ref and pins checkouts to immutable objects.
+          # Fails closed if either repo does not have a matching tag/branch.
+          resolve_ref_sha() {
+            local token="$1" repo="$2" ref="$3"
+            local sha
+            if sha="$(GH_TOKEN="$token" gh api "repos/$repo/commits/$ref" \
+                  --jq '.sha // empty' 2>/dev/null)" && [ -n "$sha" ]; then
+              printf '%s' "$sha"
+              return 0
+            fi
+            return 1
+          }
+
+          ADR_SHA=""
+          if ! ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" \
+                "Starisian-Technologies/sparxstar-architecture-governance-registry" \
+                "$CONTRACT_REF")" || [ -z "$ADR_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' in ADR registry. Ensure the tag or branch exists."
+            exit 1
+          fi
+
+          SPEC_SHA=""
+          if ! SPEC_SHA="$(resolve_ref_sha "$SPEC_TOKEN" \
+                "Starisian-Technologies/sparxstar-product-specification-registry" \
+                "$CONTRACT_REF")" || [ -z "$SPEC_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' in product-spec registry. Ensure the tag or branch exists."
+            exit 1
+          fi
+
+          echo "adr-sha=$ADR_SHA" >> "$GITHUB_OUTPUT"
+          echo "spec-sha=$SPEC_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-claude-pr-review
-          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
+          ref: ${{ github.job_workflow_sha }}
           persist-credentials: false
           fetch-depth: 1
           path: .spx-workflow-repo
@@ -191,7 +211,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-architecture-governance-registry
-          ref: ${{ steps.contract.outputs.ref }}
+          ref: ${{ steps.contract-shas.outputs.adr-sha }}
           token: ${{ steps.adr-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
@@ -201,7 +221,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-product-specification-registry
-          ref: ${{ steps.contract.outputs.ref }}
+          ref: ${{ steps.contract-shas.outputs.spec-sha }}
           token: ${{ steps.spec-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
