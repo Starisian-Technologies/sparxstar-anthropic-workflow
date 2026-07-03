@@ -277,8 +277,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          REPOSITORY="${PR_HEAD_REPO_FULL_NAME:-$GITHUB_REPOSITORY_SAFE}"
-          REF="${PR_HEAD_SHA:-$GITHUB_SHA_SAFE}"
+          REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+          REF="$GITHUB_SHA_SAFE"
 
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             MERGE_COMMIT_SHA=""
@@ -287,14 +287,25 @@ jobs:
               if [ -n "$MERGE_COMMIT_SHA" ]; then
                 REPOSITORY="$GITHUB_REPOSITORY_SAFE"
                 REF="$MERGE_COMMIT_SHA"
+              else
+                echo "::error::PR merge commit is unavailable; refusing to checkout untrusted PR head in privileged workflow."
+                if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
+                  echo "::group::gh pr view stderr"
+                  cat "$MERGE_REF_CHECK_STDERR"
+                  echo "::endgroup::"
+                fi
+                rm -f "$MERGE_REF_CHECK_STDERR"
+                exit 1
               fi
             else
-              echo "::warning::Unable to query PR merge commit; falling back to PR head SHA."
+              echo "::error::Unable to query PR merge commit; refusing to checkout untrusted PR head in privileged workflow."
               if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
                 echo "::group::gh pr view stderr"
                 cat "$MERGE_REF_CHECK_STDERR"
                 echo "::endgroup::"
               fi
+              rm -f "$MERGE_REF_CHECK_STDERR"
+              exit 1
             fi
             rm -f "$MERGE_REF_CHECK_STDERR"
           fi
