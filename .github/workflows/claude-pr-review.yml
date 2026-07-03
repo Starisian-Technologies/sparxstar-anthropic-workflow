@@ -416,62 +416,62 @@ jobs:
           export SPECS_FILE
 
           python3 - <<'PY'
-import re
-import sys
-import os
-from pathlib import Path
+          import re
+          import sys
+          import os
+          from pathlib import Path
 
-out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
-specs_file = os.environ.get("SPECS_FILE", "")
+          out_path = os.environ.get("GITHUB_OUTPUT", "/dev/null")
+          specs_file = os.environ.get("SPECS_FILE", "")
 
-if not specs_file or not Path(specs_file).exists():
-    with open(out_path, "a") as f:
-        f.write("specs_ids=(none declared)\n")
-        f.write("contracts_ids=(none declared)\n")
-        f.write("adrs_ids=(none declared)\n")
-        f.write("has_declaration=false\n")
-    sys.exit(0)
+          if not specs_file or not Path(specs_file).exists():
+              with open(out_path, "a") as f:
+                  f.write("specs_ids=(none declared)\n")
+                  f.write("contracts_ids=(none declared)\n")
+                  f.write("adrs_ids=(none declared)\n")
+                  f.write("has_declaration=false\n")
+              sys.exit(0)
 
-try:
-    text = Path(specs_file).read_text(encoding="utf-8")
+          try:
+              text = Path(specs_file).read_text(encoding="utf-8")
 
-    def extract_ids(section, text):
-        ids = []
-        in_section = False
-        for line in text.splitlines():
-            if re.match(rf'^{section}:\s*$', line):
-                in_section = True
-                continue
-            if in_section:
-                stripped = line.strip()
-                # Skip blank lines and YAML comments — they don't end a section.
-                if not stripped or stripped.startswith('#'):
-                    continue
-                # A non-indented, non-comment line that isn't a list item
-                # starts a new top-level key — end of this section.
-                if line and not line[0].isspace() and not line.lstrip().startswith('-'):
-                    break
-                m = re.match(r'^-\s+id:\s+(\S+)', stripped)
-                if m:
-                    ids.append(m.group(1))
-        return ids
+              def extract_ids(section, text):
+                  ids = []
+                  in_section = False
+                  for line in text.splitlines():
+                      if re.match(rf'^{section}:\s*$', line):
+                          in_section = True
+                          continue
+                      if in_section:
+                          stripped = line.strip()
+                          # Skip blank lines and YAML comments — they don't end a section.
+                          if not stripped or stripped.startswith('#'):
+                              continue
+                          # A non-indented, non-comment line that isn't a list item
+                          # starts a new top-level key — end of this section.
+                          if line and not line[0].isspace() and not line.lstrip().startswith('-'):
+                              break
+                          m = re.match(r'^-\s+id:\s+(\S+)', stripped)
+                          if m:
+                              ids.append(m.group(1))
+                  return ids
 
-    specs = extract_ids("specs", text)
-    contracts = extract_ids("contracts", text)
-    adrs = extract_ids("adrs", text)
+              specs = extract_ids("specs", text)
+              contracts = extract_ids("contracts", text)
+              adrs = extract_ids("adrs", text)
 
-    with open(out_path, "a") as f:
-        f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
-        f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
-        f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
-        f.write("has_declaration=true\n")
-except Exception as e:
-    print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
-    with open(out_path, "a") as f:
-        f.write("specs_ids=(parse error)\n")
-        f.write("contracts_ids=(parse error)\n")
-        f.write("adrs_ids=(parse error)\n")
-        f.write("has_declaration=false\n")
+              with open(out_path, "a") as f:
+                  f.write(f"specs_ids={', '.join(specs) or '(none declared)'}\n")
+                  f.write(f"contracts_ids={', '.join(contracts) or '(none declared)'}\n")
+                  f.write(f"adrs_ids={', '.join(adrs) or '(none declared)'}\n")
+                  f.write("has_declaration=true\n")
+          except Exception as e:
+              print(f"::warning::Could not parse sparxstar-specs.yml: {e}", file=sys.stderr)
+              with open(out_path, "a") as f:
+                  f.write("specs_ids=(parse error)\n")
+                  f.write("contracts_ids=(parse error)\n")
+                  f.write("adrs_ids=(parse error)\n")
+                  f.write("has_declaration=false\n")
           PY
 
       - name: Load three-tier context
