@@ -1,5 +1,7 @@
 # SPARXSTAR Claude PR Review
 
+[![Claude PR Review (Reusable)](https://github.com/Starisian-Technologies/sparxstar-claude-pr-review/actions/workflows/claude-pr-review.yml/badge.svg)](https://github.com/Starisian-Technologies/sparxstar-claude-pr-review/actions/workflows/claude-pr-review.yml)
+
 Centralized reusable GitHub Actions workflow for Claude-powered pull request and commit review to repository specs across Starisian Technologies repositories.
 
 ## What this repository provides
