@@ -81,7 +81,7 @@ jobs:
 ```
 
 ### 7. The sequencing rule (cross-repo)
-Secrets don't auto-inherit across the `workflow_call` boundary: this reusable workflow must **declare** a secret under `on.workflow_call.secrets` before a consumer can pass it, and this repo must **re-tag** afterward so the pinned tag contains the declaration. The `v1.1.0` release already includes the `ANTHROPIC_API_KEY` and `COMPOSER_RESOLVER_PRIVATE_KEY` declarations, so a consumer pinning `@v1.1.0` and passing both is consistent. A future change to the declared secrets requires cutting a new tag (e.g. `v1.1.1`) before consumers can pin it and pass them.
+Secrets don't auto-inherit across the `workflow_call` boundary: this reusable workflow must **declare** a secret under `on.workflow_call.secrets` before a consumer can pass it, and this repo must **re-tag** afterward so the pinned tag contains the declaration. The `v1.1.0` release declares both `ANTHROPIC_API_KEY` and `COMPOSER_RESOLVER_PRIVATE_KEY`, so once that tag is cut, a consumer pinning `@v1.1.0` and passing both is consistent. A future change to the declared secrets requires cutting a new tag (e.g. `v1.1.1`) before consumers can pin it and pass them.
 
 ## Workflow behavior
 The workflow runs as two jobs to keep the privileged registry credential away from untrusted PR-head code (see [Determinism and safeguards](#determinism-and-safeguards)):

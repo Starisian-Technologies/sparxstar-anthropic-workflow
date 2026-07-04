@@ -76,8 +76,8 @@ These are **Variables, not Secrets** — a client-id placed in a Secret slot (or
 private key placed in a Variable) fails the mint. Variables propagate into a
 reusable workflow automatically; secrets do not (see Section 7).
 
-**The `v1.1.0` tag of this repo must exist** so the `uses:` pin resolves. It
-does (the platform release tag is cut).
+**The `v1.1.0` tag of this repo must exist** so the `uses:` pin resolves.
+Confirm with `git ls-remote --tags origin` before relying on this pin.
 
 **Who provisions these:** installing the App and creating organization-level
 secrets/variables require org-admin rights (repository-level secrets/variables
