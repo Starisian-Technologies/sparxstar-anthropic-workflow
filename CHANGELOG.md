@@ -5,6 +5,12 @@ All notable changes to this repository should be documented in this file.
 The format is based on Keep a Changelog and follows semantic-versioning release intent.
 
 ## [Unreleased]
+### Fixed
+- Replaced the `github.job_workflow_ref` string-parsing used to resolve the platform-reference-docs checkout ref with `github.job_workflow_sha`, a GitHub-resolved commit SHA. This removes the last edge case where a caller-repo run could hand `actions/checkout` a ref that only exists in the caller (the `refs/pull/<n>/merge` / `couldn't find remote ref` failure mode) instead of a ref of this repository.
+
+### Security
+- ADR and product-spec registry checkouts now pin to a commit SHA resolved from `contract_ref` via the GitHub API (`Resolve contract ref SHAs`), rather than checking out the mutable tag/branch name directly — the ref cannot move under the job between resolution and checkout.
+- The `review` job's PR-code checkout no longer falls back to the untrusted PR-head SHA when the PR's merge commit is unavailable; it now fails the job (resolves CodeQL "checkout of untrusted code in a trusted context" for this job, which holds `pull-requests: write` but — unlike `build-context` — no cross-repo App-key credential).
 
 ## [1.1.0] - 2026-07-04
 ### Added

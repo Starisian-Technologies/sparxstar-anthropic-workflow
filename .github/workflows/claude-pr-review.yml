@@ -82,30 +82,6 @@ jobs:
             exit 1
           fi
 
-      - name: Resolve workflow repository ref
-        id: workflow_repo_ref
-        env:
-          WORKFLOW_REF: ${{ github.job_workflow_ref }}
-        run: |
-          set -euo pipefail
-          WORKFLOW_REF="${WORKFLOW_REF:-}"
-          RESOLVED_REF="${WORKFLOW_REF#*@}"
-
-          if [ "$RESOLVED_REF" = "$WORKFLOW_REF" ] || [ -z "$RESOLVED_REF" ]; then
-            RESOLVED_REF="main"
-          fi
-
-          case "$RESOLVED_REF" in
-            refs/heads/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/heads/}"
-              ;;
-            refs/tags/*)
-              RESOLVED_REF="${RESOLVED_REF#refs/tags/}"
-              ;;
-          esac
-
-          echo "ref=$RESOLVED_REF" >> "$GITHUB_OUTPUT"
-
       # The ADR and product-spec registries are private; the caller's
       # GITHUB_TOKEN cannot reach them. Mint short-lived, least-privilege
       # read tokens from the composer-resolver GitHub App — one scoped to
@@ -178,11 +154,56 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
+      # Resolve the validated contract_ref to immutable commit SHAs via the
+      # GitHub API before either registry checkout. Checking out a SHA rather
+      # than the caller-supplied ref name pins the fetch to an immutable
+      # object — the tag cannot move under the job between resolution and
+      # checkout. Fails closed if either repo has no matching tag/branch.
+      - name: Resolve contract ref SHAs
+        id: contract-shas
+        env:
+          CONTRACT_REF: ${{ steps.contract.outputs.ref }}
+          ADR_TOKEN: ${{ steps.adr-token.outputs.token }}
+          SPEC_TOKEN: ${{ steps.spec-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          resolve_ref_sha() {
+            local token="$1" repo="$2" ref="$3"
+            # contract_ref validation permits '/' (e.g. release/1.2 branch names,
+            # or refs/tags/... shapes); the GitHub API requires such refs to be
+            # percent-encoded in the URL path, or the slash is read as a path
+            # separator and the lookup 404s.
+            local encoded_ref
+            encoded_ref="$(jq -rn --arg r "$ref" '$r | @uri')"
+            GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" --jq '.sha // empty'
+          }
+
+          ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" "Starisian-Technologies/sparxstar-architecture-governance-registry" "$CONTRACT_REF" || true)"
+          if [ -z "$ADR_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' to a commit in sparxstar-architecture-governance-registry. Ensure the tag or branch exists."
+            exit 1
+          fi
+
+          SPEC_SHA="$(resolve_ref_sha "$SPEC_TOKEN" "Starisian-Technologies/sparxstar-product-specification-registry" "$CONTRACT_REF" || true)"
+          if [ -z "$SPEC_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' to a commit in sparxstar-product-specification-registry. Ensure the tag or branch exists."
+            exit 1
+          fi
+
+          echo "adr-sha=$ADR_SHA" >> "$GITHUB_OUTPUT"
+          echo "spec-sha=$SPEC_SHA" >> "$GITHUB_OUTPUT"
+
+      # github.job_workflow_sha is the commit SHA of this reusable workflow
+      # file itself, resolved by GitHub — not string-parsed from a ref. Using
+      # it directly (rather than parsing github.job_workflow_ref for a tag/
+      # branch name) avoids ever handing checkout a ref that only exists in
+      # the caller's repository (e.g. refs/pull/<n>/merge).
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-claude-pr-review
-          ref: ${{ steps.workflow_repo_ref.outputs.ref }}
+          ref: ${{ github.job_workflow_sha }}
           persist-credentials: false
           fetch-depth: 1
           path: .spx-workflow-repo
@@ -191,7 +212,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-architecture-governance-registry
-          ref: ${{ steps.contract.outputs.ref }}
+          ref: ${{ steps.contract-shas.outputs.adr-sha }}
           token: ${{ steps.adr-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
@@ -201,7 +222,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: Starisian-Technologies/sparxstar-product-specification-registry
-          ref: ${{ steps.contract.outputs.ref }}
+          ref: ${{ steps.contract-shas.outputs.spec-sha }}
           token: ${{ steps.spec-token.outputs.token }}
           persist-credentials: false
           fetch-depth: 1
@@ -265,36 +286,41 @@ jobs:
       pull-requests: write
 
     steps:
+      # This job checks out the resolved ref read-only (never builds, installs,
+      # or executes it) and holds no cross-repo credential, but it does hold
+      # pull-requests: write. To keep that write capability from ever sitting
+      # alongside attacker-controlled code, this step refuses to fall back to
+      # the untrusted PR head: it requires a merge commit SHA (which only
+      # exists once GitHub has synthesized the merge of PR head onto base) or
+      # fails the job outright. Non-PR invocations still use github.sha.
       - name: Resolve checkout target
         id: checkout_target
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_REPOSITORY_SAFE: ${{ github.repository }}
           GITHUB_SHA_SAFE: ${{ github.sha }}
           GH_REPO: ${{ github.repository }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          REPOSITORY="${PR_HEAD_REPO_FULL_NAME:-$GITHUB_REPOSITORY_SAFE}"
-          REF="${PR_HEAD_SHA:-$GITHUB_SHA_SAFE}"
+          REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+          REF="$GITHUB_SHA_SAFE"
 
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             MERGE_COMMIT_SHA=""
             MERGE_REF_CHECK_STDERR="$(mktemp)"
-            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")"; then
-              if [ -n "$MERGE_COMMIT_SHA" ]; then
-                REPOSITORY="$GITHUB_REPOSITORY_SAFE"
-                REF="$MERGE_COMMIT_SHA"
-              fi
+            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")" && [ -n "$MERGE_COMMIT_SHA" ]; then
+              REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+              REF="$MERGE_COMMIT_SHA"
             else
-              echo "::warning::Unable to query PR merge commit; falling back to PR head SHA."
+              echo "::error::PR merge commit is unavailable (query failed or PR is not mergeable). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve merge conflicts or re-run once GitHub has computed a merge commit."
               if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
                 echo "::group::gh pr view stderr"
                 cat "$MERGE_REF_CHECK_STDERR"
                 echo "::endgroup::"
               fi
+              rm -f "$MERGE_REF_CHECK_STDERR"
+              exit 1
             fi
             rm -f "$MERGE_REF_CHECK_STDERR"
           fi

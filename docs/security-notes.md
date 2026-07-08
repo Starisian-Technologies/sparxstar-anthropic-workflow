@@ -81,3 +81,28 @@ justification** so a genuinely new or changed occurrence re-alerts.
 PR-head code or the PR's repository, executes anything from a checked-out tree,
 or the registry checkouts switch from fixed repositories to an input-controlled
 repository (not just an input-controlled ref).
+
+## Fixed finding: same query, `review` job's checkout-target resolution
+
+A second occurrence of the same CodeQL query — *Checkout of untrusted code in
+a trusted context* — fired on the **`review`** job's `Resolve checkout target`
+/ `Checkout code` steps: that job holds `pull-requests: write`, and its
+resolved ref could previously fall back to the raw, untrusted PR-head SHA
+(`github.event.pull_request.head.sha`) whenever the PR's merge commit was
+unavailable (e.g. `gh pr view` failure, or the PR not currently mergeable).
+Unlike the `build-context` finding above, this one was **not** dismissed —
+`review` genuinely holds a live token. The fix is fail-closed, not a
+justification: `Resolve checkout target` now requires a merge commit SHA (via
+`gh pr view --json mergeCommit`) for PR runs and fails the job if one cannot be
+resolved, instead of silently checking out the untrusted head.
+
+**Invariant — do not revert to a permissive fallback.** Before this fix,
+`Resolve checkout target` fell back to `github.event.pull_request.head.sha`
+whenever the merge-commit query failed or returned empty, so the job kept
+running (against the wrong, untrusted ref) rather than failing. That
+"keep going" behavior is exactly the vulnerability this fix closes, so it must
+not be reintroduced — including as a reliability fix for the tradeoff noted in
+PR #39's Risk Assessment (the job now hard-fails on PRs GitHub hasn't finished
+computing a merge commit for, instead of silently reviewing the wrong ref). If
+that failure mode needs to be smoothed over, the fix is retrying the merge-
+commit query or re-running the job, not restoring the untrusted-head fallback.
