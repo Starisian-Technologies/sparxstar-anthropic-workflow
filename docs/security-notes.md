@@ -81,3 +81,17 @@ justification** so a genuinely new or changed occurrence re-alerts.
 PR-head code or the PR's repository, executes anything from a checked-out tree,
 or the registry checkouts switch from fixed repositories to an input-controlled
 repository (not just an input-controlled ref).
+
+## Fixed finding: same query, `review` job's checkout-target resolution
+
+A second occurrence of the same CodeQL query — *Checkout of untrusted code in
+a trusted context* — fired on the **`review`** job's `Resolve checkout target`
+/ `Checkout code` steps: that job holds `pull-requests: write`, and its
+resolved ref could previously fall back to the raw, untrusted PR-head SHA
+(`github.event.pull_request.head.sha`) whenever the PR's merge commit was
+unavailable (e.g. `gh pr view` failure, or the PR not currently mergeable).
+Unlike the `build-context` finding above, this one was **not** dismissed —
+`review` genuinely holds a live token. The fix is fail-closed, not a
+justification: `Resolve checkout target` now requires a merge commit SHA (via
+`gh pr view --json mergeCommit`) for PR runs and fails the job if one cannot be
+resolved, instead of silently checking out the untrusted head.

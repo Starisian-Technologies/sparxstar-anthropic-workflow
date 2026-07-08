@@ -55,8 +55,11 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
         self.assertIn("token: ${{ steps.spec-token.outputs.token }}", self.workflow)
-        # Registry checkouts use the validated contract ref, not the raw input.
-        self.assertIn("ref: ${{ steps.contract.outputs.ref }}", self.workflow)
+        # The contract_ref is resolved to immutable commit SHAs via the GitHub API
+        # before any checkout; the checkout steps use those SHAs, not the raw input.
+        self.assertIn("Resolve contract ref SHAs", self.workflow)
+        self.assertIn("ref: ${{ steps.contract-shas.outputs.adr-sha }}", self.workflow)
+        self.assertIn("ref: ${{ steps.contract-shas.outputs.spec-sha }}", self.workflow)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
