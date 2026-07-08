@@ -10,7 +10,7 @@ The format is based on Keep a Changelog and follows semantic-versioning release 
 
 ### Security
 - ADR and product-spec registry checkouts now pin to a commit SHA resolved from `contract_ref` via the GitHub API (`Resolve contract ref SHAs`), rather than checking out the mutable tag/branch name directly — the ref cannot move under the job between resolution and checkout.
-- The unprivileged `review` job's PR-code checkout no longer falls back to the untrusted PR-head SHA when the PR's merge commit is unavailable; it now fails the job (resolves CodeQL "checkout of untrusted code in a trusted context" for the `pull-requests: write` job).
+- The `review` job's PR-code checkout no longer falls back to the untrusted PR-head SHA when the PR's merge commit is unavailable; it now fails the job (resolves CodeQL "checkout of untrusted code in a trusted context" for this job, which holds `pull-requests: write` but — unlike `build-context` — no cross-repo App-key credential).
 
 ## [1.1.0] - 2026-07-04
 ### Added

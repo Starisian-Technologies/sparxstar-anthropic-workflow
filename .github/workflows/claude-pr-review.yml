@@ -176,7 +176,7 @@ jobs:
             # separator and the lookup 404s.
             local encoded_ref
             encoded_ref="$(jq -rn --arg r "$ref" '$r | @uri')"
-            GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" --jq '.sha // empty' 2>/dev/null
+            GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" --jq '.sha // empty'
           }
 
           ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" "Starisian-Technologies/sparxstar-architecture-governance-registry" "$CONTRACT_REF" || true)"
