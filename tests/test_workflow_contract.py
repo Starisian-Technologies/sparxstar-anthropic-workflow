@@ -61,6 +61,16 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("ref: ${{ steps.contract-shas.outputs.adr-sha }}", self.workflow)
         self.assertIn("ref: ${{ steps.contract-shas.outputs.spec-sha }}", self.workflow)
 
+    def test_contract_ref_sha_resolution_url_encodes_ref(self) -> None:
+        # contract_ref validation allows '/' (e.g. release/1.2 branch names),
+        # but the GitHub API path requires such refs to be percent-encoded or
+        # the slash is read as a path separator and the lookup 404s.
+        resolve_start = self.workflow.index("resolve_ref_sha() {")
+        resolve_end = self.workflow.index("\n          }", resolve_start)
+        resolve_body = self.workflow[resolve_start:resolve_end]
+        self.assertIn("@uri", resolve_body)
+        self.assertIn("gh api \"repos/$repo/commits/$encoded_ref\"", resolve_body)
+
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
         self.assertIn("CONTRACT_REF: ${{ inputs.contract_ref }}", self.workflow)

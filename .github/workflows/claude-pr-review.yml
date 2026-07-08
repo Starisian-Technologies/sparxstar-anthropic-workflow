@@ -170,7 +170,13 @@ jobs:
 
           resolve_ref_sha() {
             local token="$1" repo="$2" ref="$3"
-            GH_TOKEN="$token" gh api "repos/$repo/commits/$ref" --jq '.sha // empty' 2>/dev/null
+            # contract_ref validation permits '/' (e.g. release/1.2 branch names,
+            # or refs/tags/... shapes); the GitHub API requires such refs to be
+            # percent-encoded in the URL path, or the slash is read as a path
+            # separator and the lookup 404s.
+            local encoded_ref
+            encoded_ref="$(jq -rn --arg r "$ref" '$r | @uri')"
+            GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" --jq '.sha // empty' 2>/dev/null
           }
 
           ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" "Starisian-Technologies/sparxstar-architecture-governance-registry" "$CONTRACT_REF" || true)"
