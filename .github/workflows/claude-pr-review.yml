@@ -170,8 +170,16 @@ jobs:
           # Fails closed if either repo does not have a matching tag/branch.
           resolve_ref_sha() {
             local token="$1" repo="$2" ref="$3"
-            local sha
-            if sha="$(GH_TOKEN="$token" gh api "repos/$repo/commits/$ref" \
+            local sha encoded_ref
+            # URL-encode the ref so that path segments like "release/v1" are
+            # treated as a single ref value, not multiple path components in the
+            # REST URL (repos/<repo>/commits/<ref>). Use Python for RFC 3986-
+            # compliant encoding; safe='-._~' preserves unreserved characters
+            # while encoding / and any other reserved characters.
+            encoded_ref="$(python3 -c \
+              "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe='-._~'))" \
+              "$ref")"
+            if sha="$(GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" \
                   --jq '.sha // empty' 2>/dev/null)" && [ -n "$sha" ]; then
               printf '%s' "$sha"
               return 0

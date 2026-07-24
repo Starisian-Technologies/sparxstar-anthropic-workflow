@@ -136,6 +136,18 @@ class WorkflowContractTests(unittest.TestCase):
         repo_local = review.index("AGENTS.md")
         self.assertLess(trusted, repo_local)
 
+    def test_resolve_checkout_target_never_falls_back_to_pr_head(self) -> None:
+        _, review = self._job_blocks()
+        # The checkout target must never reference the untrusted PR-head repo or
+        # SHA — not even as a fallback. Fail-closed means exiting with an error,
+        # never silently using an attacker-controllable ref.
+        self.assertNotIn("github.event.pull_request.head.repo", review)
+        self.assertNotIn("github.event.pull_request.head.sha", review)
+        # Also guard against the specific intermediate variable names used in the
+        # previous fallback implementation, catching aliased access patterns.
+        self.assertNotIn("PR_HEAD_REPO_FULL_NAME", review)
+        self.assertNotIn("PR_HEAD_SHA", review)
+
     def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
         _, review = self._job_blocks()
         # The job that checks out untrusted PR-head code...
