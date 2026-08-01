@@ -60,6 +60,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Resolve contract ref SHAs", self.workflow)
         self.assertIn("ref: ${{ steps.contract-shas.outputs.adr-sha }}", self.workflow)
         self.assertIn("ref: ${{ steps.contract-shas.outputs.spec-sha }}", self.workflow)
+        # Checkout-target resolution must not fall back to PR head refs in the privileged workflow.
+        self.assertNotIn("github.event.pull_request.head.repo.full_name", self.workflow)
+        self.assertNotIn("github.event.pull_request.head.sha", self.workflow)
+        self.assertNotIn("falling back to PR head SHA", self.workflow)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
