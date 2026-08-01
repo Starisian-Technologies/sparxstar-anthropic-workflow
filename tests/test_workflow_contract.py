@@ -50,7 +50,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
 
-    def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
+    def test_workflow_checks_out_registries_with_minted_tokens_at_resolved_shas(self) -> None:
         self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
