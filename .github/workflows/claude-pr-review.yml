@@ -154,6 +154,11 @@ jobs:
           owner: Starisian-Technologies
           repositories: sparxstar-product-specification-registry
 
+      # Resolve the validated contract_ref to immutable commit SHAs via the
+      # GitHub API before either registry checkout. Checking out a SHA rather
+      # than the caller-supplied ref name pins the fetch to an immutable
+      # object — the tag cannot move under the job between resolution and
+      # checkout. Fails closed if either repo has no matching tag/branch.
       - name: Resolve contract ref SHAs
         id: contract-shas
         env:
@@ -206,6 +211,11 @@ jobs:
           echo "adr-sha=$ADR_SHA" >> "$GITHUB_OUTPUT"
           echo "spec-sha=$SPEC_SHA" >> "$GITHUB_OUTPUT"
 
+      # github.job_workflow_sha is the commit SHA of this reusable workflow
+      # file itself, resolved by GitHub — not string-parsed from a ref. Using
+      # it directly (rather than parsing github.job_workflow_ref for a tag/
+      # branch name) avoids ever handing checkout a ref that only exists in
+      # the caller's repository (e.g. refs/pull/<n>/merge).
       - name: Checkout platform reference docs
         uses: actions/checkout@v5
         with:
@@ -293,6 +303,13 @@ jobs:
       pull-requests: write
 
     steps:
+      # This job checks out the resolved ref read-only (never builds, installs,
+      # or executes it) and holds no cross-repo credential, but it does hold
+      # pull-requests: write. To keep that write capability from ever sitting
+      # alongside attacker-controlled code, this step refuses to fall back to
+      # the untrusted PR head: it requires a merge commit SHA (which only
+      # exists once GitHub has synthesized the merge of PR head onto base) or
+      # fails the job outright. Non-PR invocations still use github.sha.
       - name: Resolve checkout target
         id: checkout_target
         env:
@@ -309,22 +326,11 @@ jobs:
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             MERGE_COMMIT_SHA=""
             MERGE_REF_CHECK_STDERR="$(mktemp)"
-            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")"; then
-              if [ -n "$MERGE_COMMIT_SHA" ]; then
-                REPOSITORY="$GITHUB_REPOSITORY_SAFE"
-                REF="$MERGE_COMMIT_SHA"
-              else
-                echo "::error::PR merge commit is unavailable; refusing to checkout untrusted PR head in privileged workflow."
-                if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
-                  echo "::group::gh pr view stderr"
-                  cat "$MERGE_REF_CHECK_STDERR"
-                  echo "::endgroup::"
-                fi
-                rm -f "$MERGE_REF_CHECK_STDERR"
-                exit 1
-              fi
+            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")" && [ -n "$MERGE_COMMIT_SHA" ]; then
+              REPOSITORY="$GITHUB_REPOSITORY_SAFE"
+              REF="$MERGE_COMMIT_SHA"
             else
-              echo "::error::Unable to query PR merge commit; refusing to checkout untrusted PR head in privileged workflow."
+              echo "::error::PR merge commit is unavailable (query failed or PR is not mergeable). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve merge conflicts or re-run once GitHub has computed a merge commit."
               if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
                 echo "::group::gh pr view stderr"
                 cat "$MERGE_REF_CHECK_STDERR"

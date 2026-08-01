@@ -65,6 +65,17 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("github.event.pull_request.head.sha", self.workflow)
         self.assertNotIn("falling back to PR head SHA", self.workflow)
 
+    def test_contract_ref_sha_resolution_url_encodes_ref(self) -> None:
+        # contract_ref validation allows '/' (e.g. release/1.2 branch names),
+        # but the GitHub API path requires such refs to be percent-encoded or
+        # the slash is read as a path separator and the lookup 404s.
+        resolve_start = self.workflow.index("resolve_ref_sha() {")
+        resolve_end = self.workflow.index("\n          }", resolve_start)
+        resolve_body = self.workflow[resolve_start:resolve_end]
+        self.assertIn("urllib.parse.quote", resolve_body)
+        self.assertIn("safe='-._~'", resolve_body)
+        self.assertIn("gh api \"repos/$repo/commits/$encoded_ref\"", resolve_body)
+
     def test_contract_ref_is_validated_before_checkout(self) -> None:
         self.assertIn("Validate contract_ref", self.workflow)
         self.assertIn("CONTRACT_REF: ${{ inputs.contract_ref }}", self.workflow)
@@ -313,12 +324,12 @@ class WorkflowContractTests(unittest.TestCase):
 
     def test_consumer_example_pins_immutable_tag_and_passes_resolver_secret(self) -> None:
         # Platform convention: pin the immutable release tag, not @v1 or @main.
-        self._assert_claude_workflow_pinned_to(self.consumer_example, "v1.0.0")
+        self._assert_claude_workflow_pinned_to(self.consumer_example, "v1.1.0")
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY: ${{ secrets.COMPOSER_RESOLVER_PRIVATE_KEY }}", self.consumer_example)
         self.assertIn("contract_ref: v1.0.0", self.consumer_example)
 
     def test_readme_pins_immutable_tag_and_documents_resolver_requirements(self) -> None:
-        self._assert_claude_workflow_pinned_to(self.readme, "v1.0.0")
+        self._assert_claude_workflow_pinned_to(self.readme, "v1.1.0")
         self.assertIn("COMPOSER_RESOLVER_PRIVATE_KEY", self.readme)
         self.assertIn("COMPOSER_RESOLVER_CLIENT_ID", self.readme)
         self.assertIn("contract_ref", self.readme)
