@@ -126,7 +126,7 @@ The reviewer only reads the registries — there is no contract-sync or write-ba
 
 ## Troubleshooting
 ### `not our ref` during platform docs checkout
-If a remote workflow run (in a caller repo) fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref` (e.g. trying to fetch `refs/pull/<n>/merge`), ensure the reusable workflow is up to date. Current versions pin the reference-docs checkout to `github.job_workflow_sha` (the commit SHA of *this* reusable workflow for the running job), so cross-repository calls always use a ref that exists in this repository. Earlier versions read `github.workflow_ref`, which in a reusable call is the *caller's* top-level ref (its PR ref on a `pull_request` run); applying that to this repo fails because the caller's PR exists only in the caller.
+If a remote workflow run (in a caller repo) fails while checking out `.spx-workflow-repo` with `upload-pack: not our ref` (e.g. trying to fetch `refs/pull/<n>/merge`), ensure the reusable workflow is up to date. Current versions pin the reference-docs checkout to `github.job_workflow_sha` — the immutable commit SHA of *this* reusable workflow for the job — so cross-repository calls always fetch a valid commit from this repository. Earlier versions read `github.workflow_ref`, which in a reusable call is the *caller's* top-level ref (its PR ref on a `pull_request` run); applying that to this repo fails because the caller's PR exists only in the caller.
 
 ### Change diff is empty
 Confirm the caller uses `pull_request` or `push`, and that the event includes code changes.
