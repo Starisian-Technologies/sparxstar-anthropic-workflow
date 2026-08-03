@@ -50,7 +50,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("repositories: sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repositories: sparxstar-product-specification-registry", self.workflow)
 
-    def test_workflow_checks_out_registries_with_minted_tokens_at_contract_ref(self) -> None:
+    def test_workflow_checks_out_registries_with_minted_tokens_at_resolved_shas(self) -> None:
         self.assertIn("repository: Starisian-Technologies/sparxstar-architecture-governance-registry", self.workflow)
         self.assertIn("repository: Starisian-Technologies/sparxstar-product-specification-registry", self.workflow)
         self.assertIn("token: ${{ steps.adr-token.outputs.token }}", self.workflow)
@@ -60,6 +60,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("Resolve contract ref SHAs", self.workflow)
         self.assertIn("ref: ${{ steps.contract-shas.outputs.adr-sha }}", self.workflow)
         self.assertIn("ref: ${{ steps.contract-shas.outputs.spec-sha }}", self.workflow)
+        # Checkout-target resolution must not fall back to PR head refs in the privileged workflow.
+        self.assertNotIn("github.event.pull_request.head.repo.full_name", self.workflow)
+        self.assertNotIn("github.event.pull_request.head.sha", self.workflow)
+        self.assertNotIn("falling back to PR head SHA", self.workflow)
 
     def test_contract_ref_sha_resolution_url_encodes_ref(self) -> None:
         # contract_ref validation allows '/' (e.g. release/1.2 branch names),
@@ -68,7 +72,8 @@ class WorkflowContractTests(unittest.TestCase):
         resolve_start = self.workflow.index("resolve_ref_sha() {")
         resolve_end = self.workflow.index("\n          }", resolve_start)
         resolve_body = self.workflow[resolve_start:resolve_end]
-        self.assertIn("@uri", resolve_body)
+        self.assertIn("urllib.parse.quote", resolve_body)
+        self.assertIn("safe='-._~'", resolve_body)
         self.assertIn("gh api \"repos/$repo/commits/$encoded_ref\"", resolve_body)
 
     def test_contract_ref_is_validated_before_checkout(self) -> None:
@@ -145,6 +150,18 @@ class WorkflowContractTests(unittest.TestCase):
         trusted = review.index(".spx-trusted-context")
         repo_local = review.index("AGENTS.md")
         self.assertLess(trusted, repo_local)
+
+    def test_resolve_checkout_target_never_falls_back_to_pr_head(self) -> None:
+        _, review = self._job_blocks()
+        # The checkout target must never reference the untrusted PR-head repo or
+        # SHA — not even as a fallback. Fail-closed means exiting with an error,
+        # never silently using an attacker-controllable ref.
+        self.assertNotIn("github.event.pull_request.head.repo", review)
+        self.assertNotIn("github.event.pull_request.head.sha", review)
+        # Also guard against the specific intermediate variable names used in the
+        # previous fallback implementation, catching aliased access patterns.
+        self.assertNotIn("PR_HEAD_REPO_FULL_NAME", review)
+        self.assertNotIn("PR_HEAD_SHA", review)
 
     def test_unprivileged_review_job_has_no_app_key_and_only_consumes_artifact(self) -> None:
         _, review = self._job_blocks()

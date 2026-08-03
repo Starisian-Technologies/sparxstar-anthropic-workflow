@@ -168,26 +168,43 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Resolve the validated contract_ref to immutable commit SHAs via the
+          # GitHub API. Using API-returned SHAs (rather than the caller-supplied
+          # ref name) in the checkout steps breaks the taint chain from
+          # inputs.contract_ref and pins checkouts to immutable objects.
+          # Fails closed if either repo does not have a matching tag/branch.
           resolve_ref_sha() {
             local token="$1" repo="$2" ref="$3"
-            # contract_ref validation permits '/' (e.g. release/1.2 branch names,
-            # or refs/tags/... shapes); the GitHub API requires such refs to be
-            # percent-encoded in the URL path, or the slash is read as a path
-            # separator and the lookup 404s.
-            local encoded_ref
-            encoded_ref="$(jq -rn --arg r "$ref" '$r | @uri')"
-            GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" --jq '.sha // empty'
+            local sha encoded_ref
+            # URL-encode the ref so that path segments like "release/v1" are
+            # treated as a single ref value, not multiple path components in the
+            # REST URL (repos/<repo>/commits/<ref>). Use Python for RFC 3986-
+            # compliant encoding; safe='-._~' preserves unreserved characters
+            # while encoding / and any other reserved characters.
+            encoded_ref="$(python3 -c \
+              "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe='-._~'))" \
+              "$ref")"
+            if sha="$(GH_TOKEN="$token" gh api "repos/$repo/commits/$encoded_ref" \
+                  --jq '.sha // empty' 2>/dev/null)" && [ -n "$sha" ]; then
+              printf '%s' "$sha"
+              return 0
+            fi
+            return 1
           }
 
-          ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" "Starisian-Technologies/sparxstar-architecture-governance-registry" "$CONTRACT_REF" || true)"
-          if [ -z "$ADR_SHA" ]; then
-            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' to a commit in sparxstar-architecture-governance-registry. Ensure the tag or branch exists."
+          ADR_SHA=""
+          if ! ADR_SHA="$(resolve_ref_sha "$ADR_TOKEN" \
+                "Starisian-Technologies/sparxstar-architecture-governance-registry" \
+                "$CONTRACT_REF")" || [ -z "$ADR_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' in ADR registry. Ensure the tag or branch exists."
             exit 1
           fi
 
-          SPEC_SHA="$(resolve_ref_sha "$SPEC_TOKEN" "Starisian-Technologies/sparxstar-product-specification-registry" "$CONTRACT_REF" || true)"
-          if [ -z "$SPEC_SHA" ]; then
-            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' to a commit in sparxstar-product-specification-registry. Ensure the tag or branch exists."
+          SPEC_SHA=""
+          if ! SPEC_SHA="$(resolve_ref_sha "$SPEC_TOKEN" \
+                "Starisian-Technologies/sparxstar-product-specification-registry" \
+                "$CONTRACT_REF")" || [ -z "$SPEC_SHA" ]; then
+            echo "::error::Unable to resolve contract_ref '${CONTRACT_REF}' in product-spec registry. Ensure the tag or branch exists."
             exit 1
           fi
 
