@@ -326,13 +326,26 @@ jobs:
           if [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
             MERGE_COMMIT_SHA=""
             MERGE_REF_CHECK_STDERR="$(mktemp)"
-            if MERGE_COMMIT_SHA="$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json mergeCommit --jq '.mergeCommit.oid // empty' 2> "$MERGE_REF_CHECK_STDERR")" && [ -n "$MERGE_COMMIT_SHA" ]; then
+            # REST `merge_commit_sha`, NOT GraphQL `mergeCommit`.
+            #
+            # They are different commits. GraphQL's `mergeCommit` is the commit
+            # created BY merging, so it is null for every open pull request and
+            # only appears once the PR is already merged. Querying it here meant
+            # this step could never succeed on a PR under review: every run took
+            # the else branch and failed with "PR merge commit is unavailable",
+            # which reads like a mergeability problem and is not one.
+            #
+            # REST `merge_commit_sha` is GitHub's synthesized TEST-merge of head
+            # onto base — exactly the "merge of PR head onto base" this step's
+            # comment describes wanting, populated for open PRs, and identical
+            # to refs/pull/<n>/merge.
+            if MERGE_COMMIT_SHA="$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.merge_commit_sha // empty' 2> "$MERGE_REF_CHECK_STDERR")" && [ -n "$MERGE_COMMIT_SHA" ]; then
               REPOSITORY="$GITHUB_REPOSITORY_SAFE"
               REF="$MERGE_COMMIT_SHA"
             else
-              echo "::error::PR merge commit is unavailable (query failed or PR is not mergeable). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve merge conflicts or re-run once GitHub has computed a merge commit."
+              echo "::error::PR test-merge commit is unavailable (merge_commit_sha empty — the PR has a merge conflict, or GitHub has not finished computing the test merge). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve conflicts, or re-run once the test merge exists."
               if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
-                echo "::group::gh pr view stderr"
+                echo "::group::gh api stderr"
                 cat "$MERGE_REF_CHECK_STDERR"
                 echo "::endgroup::"
               fi
