@@ -343,7 +343,7 @@ jobs:
               REPOSITORY="$GITHUB_REPOSITORY_SAFE"
               REF="$MERGE_COMMIT_SHA"
             else
-              echo "::error::PR test-merge commit is unavailable (merge_commit_sha empty — the PR has a merge conflict, or GitHub has not finished computing the test merge). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve conflicts, or re-run once the test merge exists."
+              echo "::error::PR test-merge commit is unavailable (gh api query failed, or merge_commit_sha is empty — the PR has a merge conflict, or GitHub has not finished computing the test merge). Refusing to fall back to untrusted PR-head checkout in a job with pull-requests: write. Resolve conflicts, or re-run once the test merge exists."
               if [ -s "$MERGE_REF_CHECK_STDERR" ]; then
                 echo "::group::gh api stderr"
                 cat "$MERGE_REF_CHECK_STDERR"
