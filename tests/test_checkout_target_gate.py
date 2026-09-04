@@ -13,6 +13,7 @@ zero-dependency test setup.
 from pathlib import Path
 import os
 import re
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -23,20 +24,37 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO_ROOT / ".github/workflows/claude-pr-review.yml"
 
 
-def extract_checkout_target_script() -> str:
+def extract_checkout_target_script(text: str | None = None) -> str:
     """Return the `run:` body of the `Resolve checkout target` step.
 
     Located by step id rather than by line number so the test keeps working
     when the workflow is edited above it.
+
+    `text` is injectable so the extractor's own robustness can be tested against
+    YAML formatting variants without editing the real workflow.
     """
-    text = WORKFLOW.read_text(encoding="utf-8")
+    if text is None:
+        text = WORKFLOW.read_text(encoding="utf-8")
 
     start = text.index("id: checkout_target")
-    run_marker = text.index("run: |", start)
-    body_start = text.index("\n", run_marker) + 1
+
+    # Accept the block-scalar variants YAML allows: `run: |`, `|-`, `|+`.
+    run_match = re.search(r"^\s*run:\s*\|[-+]?\s*$", text[start:], re.MULTILINE)
+    if run_match is None:
+        raise AssertionError("no run: block found for the checkout_target step")
+    body_start = start + run_match.end() + 1
 
     lines = text[body_start:].split("\n")
-    indent = len(lines[0]) - len(lines[0].lstrip())
+
+    # Indentation comes from the first non-blank line. Taking it from lines[0]
+    # meant a leading blank line — valid YAML — produced indent 0, and the
+    # extractor then swallowed the rest of the workflow.
+    indent = next(
+        (len(line) - len(line.lstrip()) for line in lines if line.strip()),
+        None,
+    )
+    if indent is None or indent == 0:
+        raise AssertionError("could not determine block indentation")
 
     body: list[str] = []
     for line in lines:
@@ -65,8 +83,8 @@ class CheckoutTargetGateTests(unittest.TestCase):
             gh_stub = bin_dir / "gh"
             gh_stub.write_text(
                 "#!/usr/bin/env bash\n"
-                f"printf '%s' {shell_quote(gh_stdout)}\n"
-                f"printf '%s' {shell_quote(gh_stderr)} >&2\n"
+                f"printf '%s' {shlex.quote(gh_stdout)}\n"
+                f"printf '%s' {shlex.quote(gh_stderr)} >&2\n"
                 f"exit {gh_exit}\n",
                 encoding="utf-8",
             )
@@ -174,6 +192,50 @@ class CheckoutTargetGateTests(unittest.TestCase):
         self.assertFalse(Path("/tmp/pwned").exists())
 
 
+class ExtractorRobustnessTests(unittest.TestCase):
+    """The extractor must survive valid YAML formatting variants.
+
+    A brittle extractor produces confusing failures that look like gate bugs, so
+    these guard the harness itself rather than the workflow.
+    """
+
+    TEMPLATE = """jobs:
+  review:
+    steps:
+      - name: Resolve checkout target
+        id: checkout_target
+        run: {scalar}
+{blank}          echo "ref=abc" >> "$GITHUB_OUTPUT"
+      - name: Next step
+        run: |
+          echo unrelated
+"""
+
+    def _extract(self, scalar: str, blank: str = "") -> str:
+        return extract_checkout_target_script(
+            self.TEMPLATE.format(scalar=scalar, blank=blank)
+        )
+
+    def test_plain_block_scalar(self) -> None:
+        self.assertIn("GITHUB_OUTPUT", self._extract("|"))
+
+    def test_strip_and_keep_chomping_indicators(self) -> None:
+        # `|-` and `|+` are valid and mean the same thing for our purposes.
+        for scalar in ("|-", "|+"):
+            with self.subTest(scalar=scalar):
+                self.assertIn("GITHUB_OUTPUT", self._extract(scalar))
+
+    def test_leading_blank_line_does_not_swallow_the_workflow(self) -> None:
+        script = self._extract("|", blank="\n")
+
+        self.assertIn("GITHUB_OUTPUT", script)
+        self.assertNotIn("echo unrelated", script, "extraction ran past the step")
+
+    def test_missing_block_raises_a_clear_error(self) -> None:
+        with self.assertRaises(AssertionError):
+            extract_checkout_target_script("jobs:\n  x:\n    steps:\n      - id: checkout_target\n")
+
+
 class CheckoutTargetGateContractTests(unittest.TestCase):
     """Text assertions guarding against a regression to the wrong API."""
 
@@ -193,9 +255,6 @@ class CheckoutTargetGateContractTests(unittest.TestCase):
         """Without the -n guard an empty result silently yields an empty ref."""
         self.assertIn('[ -n "$MERGE_COMMIT_SHA" ]', self.workflow)
 
-
-def shell_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\\''") + "'"
 
 
 if __name__ == "__main__":
