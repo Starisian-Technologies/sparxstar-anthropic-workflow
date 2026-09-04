@@ -36,7 +36,10 @@ def extract_checkout_target_script(text: str | None = None) -> str:
     if text is None:
         text = WORKFLOW.read_text(encoding="utf-8")
 
-    start = text.index("id: checkout_target")
+    marker = "id: checkout_target"
+    start = text.find(marker)
+    if start == -1:
+        raise AssertionError(f"step marker {marker!r} not found in the workflow")
 
     # Accept the block-scalar variants YAML allows: `run: |`, `|-`, `|+`.
     run_match = re.search(r"^\s*run:\s*\|[-+]?\s*$", text[start:], re.MULTILINE)
@@ -183,13 +186,20 @@ class CheckoutTargetGateTests(unittest.TestCase):
 
     def test_non_numeric_pr_number_is_not_interpolated(self) -> None:
         """A non-numeric PR number must not reach the shell as code."""
-        code, outputs, _ = self._run(pr_number="23; touch /tmp/pwned")
+        with tempfile.TemporaryDirectory() as tmp:
+            # A unique path, so a leftover file from any other process cannot
+            # make this pass or fail by accident.
+            canary = Path(tmp) / "injection-canary"
 
-        self.assertEqual(code, 0)
-        self.assertEqual(
-            outputs.get("ref"), "0000000000000000000000000000000000000000"
-        )
-        self.assertFalse(Path("/tmp/pwned").exists())
+            code, outputs, _ = self._run(pr_number=f"23; touch {canary}")
+
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                outputs.get("ref"), "0000000000000000000000000000000000000000"
+            )
+            self.assertFalse(
+                canary.exists(), "the PR number was interpolated into the shell"
+            )
 
 
 class ExtractorRobustnessTests(unittest.TestCase):
