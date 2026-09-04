@@ -6,9 +6,11 @@ The format is based on Keep a Changelog and follows semantic-versioning release 
 
 ## [Unreleased]
 ### Fixed
+- The `review` job's checkout-target gate queried GraphQL `mergeCommit`, which is the commit created *by* merging and is therefore `null` for every open pull request. The gate could never succeed on a PR under review: every run took the else branch and failed with "PR merge commit is unavailable", which reads like a mergeability problem and is not one. It now queries REST `merge_commit_sha` — GitHub's synthesized test-merge of head onto base, populated for open PRs and identical to `refs/pull/<n>/merge`. Fail-closed behaviour is unchanged: a missing test merge or a failed query still fails the job rather than falling back to the untrusted PR head.
 - Replaced the `github.job_workflow_ref` string-parsing used to resolve the platform-reference-docs checkout ref with `github.job_workflow_sha`, a GitHub-resolved commit SHA. This removes the last edge case where a caller-repo run could hand `actions/checkout` a ref that only exists in the caller (the `refs/pull/<n>/merge` / `couldn't find remote ref` failure mode) instead of a ref of this repository.
 
 ### Security
+- Added `tests/test_checkout_target_gate.py`, which extracts the checkout-target gate's shell body from the workflow and executes it against a stubbed `gh`. It asserts that an open mergeable PR resolves to the test-merge commit, and that a missing test merge, an empty result, or a failed query each fail closed without the PR head ever reaching the checkout ref. The existing suite asserts on workflow text, which could not catch a gate that was well-formed but queried the wrong field.
 - ADR and product-spec registry checkouts now pin to a commit SHA resolved from `contract_ref` via the GitHub API (`Resolve contract ref SHAs`), rather than checking out the mutable tag/branch name directly — the ref cannot move under the job between resolution and checkout.
 - The `review` job's PR-code checkout no longer falls back to the untrusted PR-head SHA when the PR's merge commit is unavailable; it now fails the job (resolves CodeQL "checkout of untrusted code in a trusted context" for this job, which holds `pull-requests: write` but — unlike `build-context` — no cross-repo App-key credential).
 
